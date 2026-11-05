@@ -113,7 +113,7 @@ a.btn{text-decoration:none;display:inline-grid;place-items:center}
       <div class="ctl"><label class="lbl" for="sz">Size</label><output id="szo"></output><input id="sz" type="range" min="10" max="160" step="1"></div>
       <div class="ctl"><label class="lbl" for="pos">Position along arm</label><output id="poso"></output><input id="pos" type="range" min="5" max="95" step="1"></div>
       <div class="ctl"><label class="lbl" for="rot">Rotation</label><output id="roto"></output><input id="rot" type="range" min="-180" max="180" step="1"></div>
-      <div class="ctl"><label class="lbl" for="curve">Wrap around arm</label><output id="curveo"></output><input id="curve" type="range" min="0" max="100" step="1"></div>
+      <div class="ctl"><label class="lbl" for="curve">Arm roundness</label><output id="curveo"></output><input id="curve" type="range" min="0" max="100" step="1"></div>
       <div class="ctl"><label class="lbl" for="op">Ink strength</label><output id="opo"></output><input id="op" type="range" min="20" max="100" step="1"></div>
       <div class="ctl"><label class="lbl" for="tex">Skin shine over ink</label><output id="texo"></output><input id="tex" type="range" min="0" max="60" step="1"></div>
       <div class="ctl"><label class="lbl" for="smooth">Steadiness</label><output id="smootho"></output><input id="smooth" type="range" min="0" max="90" step="1"></div>
@@ -181,13 +181,13 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const L = 512;
 
 /* ---------- state ---------- */
-const F = { size: .4, pos: .45, rot: 0, curve: .45, op: .9, tex: .25, smooth: .6, flip: false, clip: true, color: '#14161b', mode: 'ink', look: 'healed', disp: 1, autoWrap: true };
+const F = { size: .4, pos: .45, rot: 0, curve: 1, op: .9, tex: .25, smooth: .6, flip: false, clip: true, color: '#14161b', mode: 'ink', look: 'healed', disp: 1 };
 const SPOTS = {
-  fore:   { label: 'Forearm',         kind: 'fore',  need: 'hand', hint: 'Point the back camera at your forearm with your hand in view. Drag the design to move it.', d: { size: .4, pos: .45, curve: .45 } },
-  lupper: { label: 'Left upper arm',  kind: 'limb',  need: 'pose', a: 11, b: 13, hint: 'Use the front camera and step back so your head and shoulders are in view.', d: { size: .45, pos: .55, curve: .4 } },
-  rupper: { label: 'Right upper arm', kind: 'limb',  need: 'pose', a: 12, b: 14, hint: 'Use the front camera and step back so your head and shoulders are in view.', d: { size: .45, pos: .55, curve: .4 } },
-  chest:  { label: 'Chest',           kind: 'chest', need: 'pose', hint: 'Use the front camera and step back so your head and chest are in view.', d: { size: .45, pos: .45, curve: .1 } },
-  free:   { label: 'Stick anywhere',  kind: 'free',  hint: 'Drag the design onto your skin and let go. It sticks to that spot and moves with you.', d: { size: .3, pos: .5, curve: .2 } },
+  fore:   { label: 'Forearm',         kind: 'fore',  need: 'hand', hint: 'Point the back camera at your forearm with your hand in view. Drag the design to move it.', d: { size: .4, pos: .45, curve: 1 } },
+  lupper: { label: 'Left upper arm',  kind: 'limb',  need: 'pose', a: 11, b: 13, hint: 'Use the front camera and step back so your head and shoulders are in view.', d: { size: .45, pos: .55, curve: 1 } },
+  rupper: { label: 'Right upper arm', kind: 'limb',  need: 'pose', a: 12, b: 14, hint: 'Use the front camera and step back so your head and shoulders are in view.', d: { size: .45, pos: .55, curve: 1 } },
+  chest:  { label: 'Chest',           kind: 'chest', need: 'pose', hint: 'Use the front camera and step back so your head and chest are in view.', d: { size: .45, pos: .45, curve: 1 } },
+  free:   { label: 'Stick anywhere',  kind: 'free',  hint: 'Drag the design onto your skin and let go. It sticks to that spot and moves with you.', d: { size: .3, pos: .5, curve: 1 } },
 };
 let spot = 'fore';
 const manual = { x: .5, y: .5 };
@@ -529,7 +529,11 @@ function matchTemplate(px, py) {
 let lastFa = null;
 function updateTracking() {
   const sp = SPOTS[spot], rot = F.rot * Math.PI / 180;
-  if (sp.kind === 'limb' || sp.kind === 'chest') { goal = target(); return; }
+  if (sp.kind === 'limb' || sp.kind === 'chest') {
+    const t = target();
+    goal = t ? { ...t, ang: t.ang - rot, roll: rot, R: t.size * (sp.kind === 'limb' ? .9 : 2.5), q0: 0 } : null;
+    return;
+  }
   lastFa = skinReady ? forearm() : null;
   if (lastFa) { armAng = Math.atan2(lastFa.a.y, lastFa.a.x); armW = lastFa.width; } else armAng = null;
   const est = sp.kind === 'fore' ? target() : null;
@@ -548,61 +552,56 @@ function updateTracking() {
       if (sp.kind === 'fore') { anchor = null; pinned = false; }
     }
   }
+  // arm frame for the 3D tube: across-arm unit vector and centre line
+  const tube = f => {
+    if (!f) return null;
+    const rx = f.a.y, ry = -f.a.x;                         // across the arm
+    return { th: Math.atan2(-f.a.x, f.a.y), R: f.width / 2, q0: p => (p.x - f.C.x) * rx + (p.y - f.C.y) * ry };
+  };
+  const tb = tube(lastFa);
   if (sp.kind === 'fore') {
     if (est && !dragging) {
       if (!anchor) { anchor = { x: est.x, y: est.y }; grabTemplate(anchor); }
       else {
-        const f = lastFa, dx = anchor.x - f.C.x, dy = anchor.y - f.C.y;
-        const q = -dx * f.a.y + dy * f.a.x;               // distance from the arm's centre line
-        if (Math.abs(q) > f.width * .9) { anchor = { x: est.x, y: est.y }; grabTemplate(anchor); pinned = false; }
+        const f = lastFa, q = tb.q0(anchor);              // distance from the arm's centre line
+        if (Math.abs(q) > f.width * .75) { anchor = { x: est.x, y: est.y }; grabTemplate(anchor); pinned = false; }
         else if (!pinned) {
-          if (f.W) { anchor.x += (est.x - anchor.x) * .06; anchor.y += (est.y - anchor.y) * .06; }
-          anchor.x -= -f.a.y * q * .12; anchor.y -= f.a.x * q * .12;
+          if (f.W) { anchor.x += (est.x - anchor.x) * .05; anchor.y += (est.y - anchor.y) * .05; }
+          // only pull back to the centre when the skin lock is lost; otherwise let it roll with the skin
+          if (!tpl) { anchor.x -= f.a.y * q * .12; anchor.y -= -f.a.x * q * .12; }
         }
       }
       if (anchor && !tpl) grabTemplate(anchor);
     }
-    if (anchor && est) goal = { x: anchor.x, y: anchor.y, ang: est.ang, size: est.size };
+    if (anchor && est && tb) goal = { x: anchor.x, y: anchor.y, ang: tb.th, roll: rot, size: est.size, R: tb.R, q0: tb.q0(anchor) };
     else if (anchor && goal) goal = { ...goal, x: anchor.x, y: anchor.y };
-    else goal = est;
+    else goal = null;
     return;
   }
   // stick anywhere
   if (!anchor) { anchor = { x: manual.x * W, y: manual.y * H }; }
   if (!tpl && !dragging) grabTemplate(anchor);
-  if (!dragging && (axisRef == null || !widthRef)) { axisRef = armAng; widthRef = armW; }
-  let ang = rot, size = F.size * Math.min(W, H);
-  if (armAng != null && axisRef != null) {
-    let da = armAng - axisRef; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
-    if (Math.abs(da) < 1.2) ang += da;
-  }
+  if (!dragging && (axisRef == null || !widthRef) && tb) { axisRef = tb.th; widthRef = armW; }
+  let size = F.size * Math.min(W, H);
   if (armW && widthRef) size *= clamp(armW / widthRef, .6, 1.6);
-  goal = { x: anchor.x, y: anchor.y, ang, size };
+  if (tb && axisRef != null) goal = { x: anchor.x, y: anchor.y, ang: tb.th, roll: rot - axisRef, size, R: tb.R, q0: tb.q0(anchor) };
+  else goal = { x: anchor.x, y: anchor.y, ang: 0, roll: rot, size, R: Infinity, q0: 0 };
 }
+const angDiff = (a, b) => { let d = a - b; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
 function track(now) {
   const t = goal;
   if (t) {
     lastGood = now;
-    if (!cur) cur = { ...t };
+    if (!cur || isFinite(t.R) !== isFinite(cur.R)) cur = { ...t };
     else {
       const ap = dragging ? 1 : 1 - F.smooth * .6, a = 1 - F.smooth * .92;
       cur.x += (t.x - cur.x) * ap; cur.y += (t.y - cur.y) * ap; cur.size += (t.size - cur.size) * a;
-      let da = t.ang - cur.ang; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
-      cur.ang += da * a;
+      cur.ang += angDiff(t.ang, cur.ang) * a;
+      cur.roll = t.roll;
+      if (isFinite(t.R)) { cur.R += (t.R - cur.R) * a; cur.q0 += (t.q0 - cur.q0) * ap; }
     }
   } else if (cur && now - lastGood > 500) cur = null;
-  autoWrap(now);
   status();
-}
-/* bend the design around the arm like a cylinder: the wider the design is
-   compared with the arm, the more it curves away at the sides */
-let lastWrap = 0;
-function autoWrap(now) {
-  const kind = SPOTS[spot].kind;
-  if (!F.autoWrap || !cur || !armW || (kind !== 'fore' && kind !== 'free') || now - lastWrap < 250) return;
-  const R = armW / 2, half = cur.size * .47;
-  const c = clamp(Math.asin(clamp(half / R, 0, .97)) / 1.25, 0, 1);
-  if (Math.abs(c - F.curve) > .04) { F.curve = c; lastWrap = now; syncUI(); buildLayer(); }
 }
 function status() {
   const pill = $('#pill'), txt = $('#pillText'), sp = SPOTS[spot], need = sp.need;
@@ -649,68 +648,95 @@ function boxBlur(src, dst, w, h, r) {
 function compose() {
   octx.globalCompositeOperation = 'source-over'; octx.globalAlpha = 1;
   octx.drawImage(frameC, 0, 0);
-  if (!cur || !layerReady || compare) return;
+  if (!cur || !layerReady || compare || !mips.length) return;
   const look = LOOKS[F.look] || LOOKS.healed;
-  const k = cur.size / L;
-  // 1. place the design (with ink spread) and keep it on skin
-  tctx.setTransform(1, 0, 0, 1, 0, 0);
-  tctx.globalCompositeOperation = 'source-over'; tctx.globalAlpha = 1;
-  tctx.clearRect(0, 0, W, H);
-  // match the camera's own softness, plus ink spreading into the skin
-  const spread = .35 + look.spread * cur.size / 700;
-  if ('filter' in tctx) tctx.filter = 'blur(' + spread.toFixed(2) + 'px)';
-  tctx.translate(cur.x, cur.y); tctx.rotate(cur.ang); tctx.scale(F.flip ? -k : k, k);
-  tctx.drawImage(layerC, -L / 2, -L / 2);
-  tctx.setTransform(1, 0, 0, 1, 0, 0);
-  tctx.filter = 'none';
-  if (F.clip && skinReady) {
-    tctx.globalCompositeOperation = 'destination-in';
-    if ('filter' in tctx) tctx.filter = 'blur(' + Math.max(1, W / 400).toFixed(1) + 'px)';
-    tctx.drawImage(skinC, 0, 0, W, H);
-    tctx.filter = 'none';
-    tctx.globalCompositeOperation = 'source-over';
-  }
-  // 2. work only inside the tattoo's box
-  const r = cur.size * .74 + 4;
-  const x0 = Math.max(0, Math.floor(cur.x - r)), y0 = Math.max(0, Math.floor(cur.y - r));
-  const x1 = Math.min(W, Math.ceil(cur.x + r)), y1 = Math.min(H, Math.ceil(cur.y + r));
-  const w = x1 - x0, h = y1 - y0;
+  const S = cur.size;
+  // pick the design resolution that matches the on-screen size (avoids shimmer)
+  let m = mips[0];
+  for (let i = mips.length - 1; i >= 0; i--) if (mips[i].w >= S * 1.3) { m = mips[i]; break; }
+  const mw = m.w, md = m.d, kk = mw / S, half = mw / 2;
+  // 3D tube: the arm as a cylinder of radius R; 'Arm roundness' flattens it
+  const roundness = Math.max(.02, F.curve);
+  const R = isFinite(cur.R) ? cur.R / roundness : Infinity;
+  const q0 = isFinite(R) ? clamp(cur.q0 || 0, -.97 * R, .97 * R) : 0;
+  const ac = isFinite(R) ? Math.asin(q0 / R) : 0;
+  const rx = Math.cos(cur.ang), ry = Math.sin(cur.ang);      // across the arm
+  const dx = -Math.sin(cur.ang), dy = Math.cos(cur.ang);     // along the arm
+  const cr = Math.cos(cur.roll || 0), sr = Math.sin(cur.roll || 0), flip = F.flip ? -1 : 1;
+  // work only inside the tattoo's box
+  const r = S * .75 + 4;
+  const bx0 = Math.max(0, Math.floor(cur.x - r)), by0 = Math.max(0, Math.floor(cur.y - r));
+  const bx1 = Math.min(W, Math.ceil(cur.x + r)), by1 = Math.min(H, Math.ceil(cur.y + r));
+  const w = bx1 - bx0, h = by1 - by0;
   if (w < 4 || h < 4) return;
-  const Ti = tctx.getImageData(x0, y0, w, h), T = Ti.data;
-  const Bi = fctx.getImageData(x0, y0, w, h), B = Bi.data;
+  const Bi = fctx.getImageData(bx0, by0, w, h), B = Bi.data;
   const n = w * h;
   const lum = buf('lum', n), lb = buf('lb', n), a = buf('a', n), ab = buf('ab', n);
-  for (let i = 0, j = 0; i < n; i++, j += 4) { lum[i] = .299 * B[j] + .587 * B[j + 1] + .114 * B[j + 2]; a[i] = T[j + 3] / 255; }
-  // skin shading (low frequency) and skin detail (pores, hair, shine = high frequency)
-  boxBlur(lum, lb, w, h, Math.max(2, Math.round(cur.size * .035)));
-  if (look.halo > 0) boxBlur(a, ab, w, h, Math.max(2, Math.round(cur.size * .02)));
-  const disp = F.disp * cur.size / 900;          // how strongly lines follow the skin's bumps
+  const tr = buf('tr', n), tg = buf('tg', n), tbb = buf('tb', n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) lum[i] = .299 * B[j] + .587 * B[j + 1] + .114 * B[j + 2];
+  // skin shading (low frequency) and skin detail (pores, hair, shine)
+  boxBlur(lum, lb, w, h, Math.max(2, Math.round(S * .035)));
+  const disp = F.disp * S / 900;
+  const sk = skinReady && F.clip ? skin : null, aw = anaC.width, ah = anaC.height, ss = aw / W;
+  // pass 1: where does each screen pixel land on the design?
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      a[i] = 0;
+      const gx = lb[i + 1] - lb[i - 1], gy = lb[i + w] - lb[i - w];
+      const ox = x + bx0 - cur.x - gx * disp, oy = y + by0 - cur.y - gy * disp;
+      const q = ox * rx + oy * ry, t = ox * dx + oy * dy;
+      let s = q, vis = 1;
+      if (R !== Infinity) {
+        const X = q + q0;
+        if (X <= -R || X >= R) continue;                    // beyond the edge of the arm
+        const al = Math.asin(X / R), cf = Math.cos(al);
+        s = R * (al - ac);                                   // distance along the curved skin
+        vis = (cf < .3 ? cf / .3 : 1) * (.72 + .28 * cf);    // fades as it turns away
+      }
+      const sx = (s * cr + t * sr) * flip, sy = -s * sr + t * cr;
+      const u = sx * kk + half - .5, v = sy * kk + half - .5;
+      if (u < 0 || v < 0 || u >= mw - 1 || v >= mw - 1) continue;
+      const iu = u | 0, iv = v | 0, fu = u - iu, fv = v - iv, p = (iv * mw + iu) * 4;
+      const w00 = (1 - fu) * (1 - fv), w10 = fu * (1 - fv), w01 = (1 - fu) * fv, w11 = fu * fv;
+      const a00 = md[p + 3] * w00, a10 = md[p + 7] * w10, a01 = md[p + mw * 4 + 3] * w01, a11 = md[p + mw * 4 + 7] * w11;
+      const A = a00 + a10 + a01 + a11;
+      if (A < 1) continue;
+      tr[i] = (md[p] * a00 + md[p + 4] * a10 + md[p + mw * 4] * a01 + md[p + mw * 4 + 4] * a11) / A;
+      tg[i] = (md[p + 1] * a00 + md[p + 5] * a10 + md[p + mw * 4 + 1] * a01 + md[p + mw * 4 + 5] * a11) / A;
+      tbb[i] = (md[p + 2] * a00 + md[p + 6] * a10 + md[p + mw * 4 + 2] * a01 + md[p + mw * 4 + 6] * a11) / A;
+      let clip = 1;
+      if (sk) {
+        const sxp = clamp((x + bx0) * ss - .5, 0, aw - 1.001), syp = clamp((y + by0) * ss - .5, 0, ah - 1.001);
+        const ix = sxp | 0, iy = syp | 0, fx = sxp - ix, fy = syp - iy, kq = iy * aw + ix;
+        clip = (sk[kq] * (1 - fx) + sk[kq + 1] * fx) * (1 - fy) + (sk[kq + aw] * (1 - fx) + sk[kq + aw + 1] * fx) * fy;
+        clip = clamp((clip - .25) / .5, 0, 1);
+      }
+      a[i] = A / 255 * vis * clip;
+    }
+  }
+  if (look.halo > 0) boxBlur(a, ab, w, h, Math.max(2, Math.round(S * .02)));
+  // pass 2: ink under the skin
   const dens = look.dens * F.op, shine = F.tex * 3, tint = look.tint;
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x, j = i * 4;
-      // displace the ink by the shading gradient so it bends over the surface
-      const gx = lb[i + 1] - lb[i - 1], gy = lb[i + w] - lb[i - w];
-      const sx = clamp(x - gx * disp, 0, w - 1.001), sy = clamp(y - gy * disp, 0, h - 1.001);
-      const ix = sx | 0, iy = sy | 0, fx = sx - ix, fy = sy - iy, q = iy * w + ix;
-      const A = (a[q] * (1 - fx) + a[q + 1] * fx) * (1 - fy) + (a[q + w] * (1 - fx) + a[q + w + 1] * fx) * fy;
-      let halo = 0;
-      if (look.halo > 0) halo = Math.max(0, ab[i] - a[i]) * look.halo;
+      const i = y * w + x, j = i * 4, A = a[i];
+      const halo = look.halo > 0 ? Math.max(0, ab[i] - A) * look.halo : 0;
       if (A < .004 && halo < .004) continue;
-      const qq = q * 4, aD = A * dens;
-      const detail = lum[i] - lb[i];
-      const hl = detail > 0 ? detail * shine * A : 0;    // skin shine and pores sit on top of the ink
+      const aD = A * dens, detail = lum[i] - lb[i];
+      const hl = detail > 0 ? detail * shine * A : 0;      // skin shine and pores stay on top of the ink
       const grain = (Math.random() - .5) * 7;
+      const T = [tr[i], tg[i], tbb[i]];
       for (let c = 0; c < 3; c++) {
-        const t = Math.max(.05, T[qq + c] / 255) * tint[c];
-        let o = B[j + c] * (1 - aD * (1 - Math.min(1, t))) + hl;
-        if (c === 0) o += halo * 28; else o -= halo * (c === 1 ? 10 : 6);   // fresh: slight redness around lines
-        o += grain * A;                                   // camera noise inside the ink, like the rest of the picture
+        const tt = Math.max(.05, T[c] / 255) * tint[c];
+        let o = B[j + c] * (1 - aD * (1 - Math.min(1, tt))) + hl;
+        if (c === 0) o += halo * 28; else o -= halo * (c === 1 ? 10 : 6);
+        o += grain * A;
         B[j + c] = o < 0 ? 0 : o > 255 ? 255 : o;
       }
     }
   }
-  octx.putImageData(Bi, x0, y0);
+  octx.putImageData(Bi, bx0, by0);
 }
 
 /* ---------- design processing ---------- */
@@ -748,30 +774,27 @@ function buildProc() {
   }
   procData = o;
 }
+/* design pyramid: the processed design at several sizes, softened slightly like ink in skin */
+let mips = [];
 function buildLayer() {
   if (!procData) return;
-  const Pd = procData.data, o = new ImageData(L, L), O = o.data;
-  const th = F.curve * 1.25, sinT = Math.sin(th), wrap = th > .001;
-  for (let x = 0; x < L; x++) {
-    const u = (x + .5) / L * 2 - 1;
-    const s = wrap ? Math.asin(clamp(u * sinT, -1, 1)) / th : u;
-    const sx = (s + 1) / 2 * L - .5, x0 = Math.floor(sx), fx = sx - x0, x1 = x0 + 1;
-    const in0 = x0 >= 0 && x0 < L, in1 = x1 >= 0 && x1 < L;
-    const shade = wrap ? .65 + .35 * Math.cos(s * th) : 1;
-    for (let y = 0; y < L; y++) {
-      const i0 = in0 ? (y * L + x0) * 4 : -1, i1 = in1 ? (y * L + x1) * 4 : -1;
-      const a0 = i0 >= 0 ? Pd[i0 + 3] * (1 - fx) : 0, a1 = i1 >= 0 ? Pd[i1 + 3] * fx : 0, a = a0 + a1;
-      if (a < .5) continue;
-      const k = (y * L + x) * 4;
-      for (let c = 0; c < 3; c++) O[k + c] = ((i0 >= 0 ? Pd[i0 + c] * a0 : 0) + (i1 >= 0 ? Pd[i1 + c] * a1 : 0)) / a;
-      O[k + 3] = a * shade;
-    }
+  const c0 = document.createElement('canvas'); c0.width = c0.height = L;
+  c0.getContext('2d').putImageData(procData, 0, 0);
+  const soft = document.createElement('canvas'); soft.width = soft.height = L;
+  const sx = soft.getContext('2d', { willReadFrequently: true });
+  if ('filter' in sx) sx.filter = 'blur(1.2px)';
+  sx.drawImage(c0, 0, 0); sx.filter = 'none';
+  mips = [{ w: L, d: sx.getImageData(0, 0, L, L).data }];
+  let prev = soft, size = L;
+  while (size > 32) {
+    size >>= 1;
+    const nc = document.createElement('canvas'); nc.width = nc.height = size;
+    const x = nc.getContext('2d', { willReadFrequently: true });
+    x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+    x.drawImage(prev, 0, 0, size, size);
+    mips.push({ w: size, d: x.getImageData(0, 0, size, size).data });
+    prev = nc;
   }
-  rawX.putImageData(o, 0, 0);
-  layX.clearRect(0, 0, L, L);
-  if ('filter' in layX) layX.filter = 'blur(0.7px)';
-  layX.drawImage(rawC, 0, 0);
-  layX.filter = 'none';
   layerReady = true;
 }
 let lraf = 0;
@@ -879,7 +902,7 @@ function renderSpots() {
 }
 async function setSpot(k) {
   spot = k; cur = null; prevAxis = null; resetLock();
-  Object.assign(F, SPOTS[k].d); F.rot = 0; F.autoWrap = true;
+  Object.assign(F, SPOTS[k].d); F.rot = 0;
   if (k === 'free') { manual.x = .5; manual.y = .5; }
   syncUI(); buildLayer(); renderSpots();
   const need = SPOTS[k].need;
@@ -909,7 +932,7 @@ function syncUI() {
   $('#pos').disabled = spot === 'free';
 }
 const bind = (id, key, after) => $('#' + id).addEventListener('input', e => { F[key] = +e.target.value / (key === 'rot' ? 1 : 100); syncUI(); if (after) after(); });
-bind('sz', 'size'); bind('pos', 'pos'); bind('rot', 'rot'); bind('curve', 'curve', () => { F.autoWrap = false; relayer(); });
+bind('sz', 'size'); bind('pos', 'pos'); bind('rot', 'rot'); bind('curve', 'curve');
 bind('op', 'op'); bind('tex', 'tex'); bind('smooth', 'smooth');
 $('#colorMode').addEventListener('change', e => { F.mode = e.target.checked ? 'color' : 'ink'; syncUI(); buildProc(); buildLayer(); });
 $('#clip').addEventListener('change', e => { F.clip = e.target.checked; });
@@ -956,7 +979,7 @@ out.addEventListener('pointermove', e => { if (dragging) dragTo(e); });
   if (anchor) {
     grabTemplate(anchor);
     if (spot === 'fore') pinned = true;
-    axisRef = armAng; widthRef = armW;
+    axisRef = lastFa ? Math.atan2(-lastFa.a.x, lastFa.a.y) : null; widthRef = armW;
   }
 }));
 out.addEventListener('wheel', e => {
