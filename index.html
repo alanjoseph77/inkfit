@@ -95,6 +95,7 @@ a.btn{text-decoration:none;display:inline-grid;place-items:center}
   <span class="mark">Inkfit</span>
   <span class="pill" id="pill" data-s="wait"><span class="dot"></span><span id="pillText">Starting…</span></span>
   <span class="sp"></span>
+  <button class="ib" id="btnMode" type="button" aria-pressed="false">Photo</button>
   <button class="ib" id="btnFlipCam" type="button" aria-label="Switch camera">Switch</button>
   <button class="ib" id="btnPause" type="button" aria-pressed="false">Freeze</button>
 </header>
@@ -103,6 +104,12 @@ a.btn{text-decoration:none;display:inline-grid;place-items:center}
   <div class="inner">
     <div class="scroll" id="spots" role="group" aria-label="Where on the body"></div>
     <p class="hint" id="spotHint"></p>
+    <div class="bar" id="photoBar" hidden>
+      <button class="btn" id="btnNewPhoto" type="button">New photo</button>
+      <button class="btn" id="btnCurve" type="button">Curve around arm</button>
+      <button class="btn" id="btnFlatten" type="button">Flatten</button>
+      <button class="btn" id="btnGrid" type="button" aria-pressed="true">Hide grid</button>
+    </div>
     <div class="scroll" id="strip" aria-label="Designs"></div>
     <div class="bar">
       <button class="btn primary" id="btnShot" type="button">Take picture</button>
@@ -143,6 +150,7 @@ a.btn{text-decoration:none;display:inline-grid;place-items:center}
       <li>Keep your fingers open so the hand is easy to find.</li>
     </ol>
     <button class="btn primary" id="btnStart" type="button">Start camera</button>
+    <button class="btn" id="btnIntroPhoto" type="button">Use a photo instead (most realistic)</button>
     <p class="msg" id="introMsg" role="status"></p>
     <p style="font-size:12px">The video stays on your device. Nothing is recorded or uploaded.</p>
   </div>
@@ -159,6 +167,7 @@ a.btn{text-decoration:none;display:inline-grid;place-items:center}
   </div>
 </div>
 
+<input type="file" id="photoIn" accept="image/*" hidden>
 <input type="file" id="fileIn" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
 
 <script type="module">
@@ -422,6 +431,7 @@ function resize() {
 function resetLock() { anchor = null; tpl = null; vel = { x: 0, y: 0 }; pinned = false; goal = null; axisRef = null; widthRef = 0; }
 function loop(now) {
   requestAnimationFrame(loop);
+  if (photoMode) { if (dirty) { dirty = false; renderPhoto(showGrid); } return; }
   if (!vid.videoWidth) return;
   if (vid.videoWidth !== W || vid.videoHeight !== H) resize();
   if (!paused && vid.currentTime !== lastVT) {
@@ -606,7 +616,8 @@ function track(now) {
 function status() {
   const pill = $('#pill'), txt = $('#pillText'), sp = SPOTS[spot], need = sp.need;
   let s = 'wait', m;
-  if (!stream) m = 'Camera off';
+  if (photoMode) m = hasPhoto ? 'Bend the grid to fit the arm' : 'Add a photo of the arm', s = hasPhoto ? 'ok' : 'wait';
+  else if (!stream) m = 'Camera off';
   else if (spot === 'free') { s = tpl ? 'ok' : 'wait'; m = dragging ? 'Let go on your skin' : tpl ? 'Stuck to your skin' : 'Drag the design onto your skin'; }
   else if (paused) { s = 'ok'; m = 'Frozen'; }
   else if (cur && spot === 'fore' && trackInfo === 'skin') { s = 'ok'; m = 'Tracking arm. Show your hand for a better fit'; }
@@ -785,6 +796,7 @@ function buildLayer() {
   if ('filter' in sx) sx.filter = 'blur(1.2px)';
   sx.drawImage(c0, 0, 0); sx.filter = 'none';
   mips = [{ w: L, d: sx.getImageData(0, 0, L, L).data }];
+  designCanvas = soft; dirty = true;
   let prev = soft, size = L;
   while (size > 32) {
     size >>= 1;
@@ -967,13 +979,15 @@ function dragTo(e) {
   else if (spot === 'free') goal = { x, y, ang: F.rot * Math.PI / 180, size: F.size * Math.min(W, H) };
 }
 out.addEventListener('pointerdown', e => {
+  if (photoMode) { photoDown(e); return; }
   const k = SPOTS[spot].kind;
   if (!W || (k !== 'free' && k !== 'fore')) return;
   dragging = true; try { out.setPointerCapture(e.pointerId); } catch (err) {}
   dragTo(e);
 });
-out.addEventListener('pointermove', e => { if (dragging) dragTo(e); });
+out.addEventListener('pointermove', e => { if (photoMode) { photoMove(e); return; } if (dragging) dragTo(e); });
 ['pointerup', 'pointercancel'].forEach(ev => out.addEventListener(ev, () => {
+  if (photoMode) { if (pdrag && pdrag.type === 'move' && G) { trainSkinAt(gridCenter(), gridFrame().wd * .15); dirty = true; } pdrag = null; return; }
   if (!dragging) return;
   dragging = false;
   if (anchor) {
@@ -985,14 +999,17 @@ out.addEventListener('pointermove', e => { if (dragging) dragTo(e); });
 out.addEventListener('wheel', e => {
   if (!W) return; e.preventDefault();
   F.size = clamp(F.size * Math.exp(-e.deltaY * .0015), .1, 1.6); syncUI();
+  if (photoMode) gridScaleTo();
 }, { passive: false });
 
 /* snapshot */
 let shotUrl = null, shotBlob = null;
 $('#btnShot').addEventListener('click', () => {
   if (!W) return;
-  compare = false; compose();
+  compare = false;
+  if (photoMode) renderPhoto(false); else compose();
   out.toBlob(b => {
+    dirty = true;
     if (!b) return;
     shotBlob = b;
     if (shotUrl) URL.revokeObjectURL(shotUrl);
@@ -1008,8 +1025,286 @@ $('#shotShare').addEventListener('click', async () => {
 });
 $('#shotClose').addEventListener('click', () => { $('#shotView').hidden = true; });
 
+/* ---------- photo mode: place the design on a still photo and bend it by hand ---------- */
+let photoMode = false, dirty = false, hasPhoto = false, showGrid = true, designCanvas = null;
+let G = null, gSize = 0, gRot = 0, pdrag = null;
+const MESH = 12;
+function resizeTo(w, h) {
+  W = w; H = h;
+  out.width = frameC.width = tmp.width = W; out.height = frameC.height = tmp.height = H;
+  anaC.width = 240; anaC.height = Math.max(1, Math.round(240 * H / W));
+  skin = null; skinReady = false;
+}
+function setPhoto(img, keepGrid) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  const k = Math.min(1, 1600 / Math.max(iw, ih)), w = Math.round(iw * k), h = Math.round(ih * k);
+  resizeTo(w, h);
+  fctx.setTransform(1, 0, 0, 1, 0, 0); fctx.drawImage(img, 0, 0, w, h);
+  skinModel = null; analyzeSkin();
+  hasPhoto = true;
+  if (!keepGrid) initGrid();
+  dirty = true; status();
+}
+function initGrid(cx, cy, size, ang) {
+  cx = cx == null ? W / 2 : cx; cy = cy == null ? H / 2 : cy;
+  size = size || F.size * Math.min(W, H);
+  ang = ang == null ? F.rot * Math.PI / 180 : ang;
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  G = [];
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const lx = (c / 3 - .5) * size, ly = (r / 3 - .5) * size;
+    G.push({ x: cx + lx * ca - ly * sa, y: cy + lx * sa + ly * ca });
+  }
+  gSize = F.size; gRot = F.rot; dirty = true;
+}
+function gridCenter() { let x = 0, y = 0; G.forEach(p => { x += p.x; y += p.y; }); return { x: x / 16, y: y / 16 }; }
+function gridFrame() {
+  let ax = 0, ay = 0, bx = 0, by = 0;
+  for (let i = 0; i < 4; i++) { ax += G[i * 4 + 3].x - G[i * 4].x; ay += G[i * 4 + 3].y - G[i * 4].y; bx += G[12 + i].x - G[i].x; by += G[12 + i].y - G[i].y; }
+  const wd = Math.hypot(ax, ay) / 4 || 1, ht = Math.hypot(bx, by) / 4 || 1;
+  return { ux: ax / (wd * 4), uy: ay / (wd * 4), wd, ht, ang: Math.atan2(ay, ax) };
+}
+function gridApply(fn) { if (!G) return; const c = gridCenter(); G = G.map(p => fn(p.x - c.x, p.y - c.y, c)); dirty = true; }
+function gridScaleTo() { const k = F.size / (gSize || F.size); gSize = F.size; gridApply((dx, dy, c) => ({ x: c.x + dx * k, y: c.y + dy * k })); }
+function gridRotateTo() {
+  const a = (F.rot - gRot) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a); gRot = F.rot;
+  gridApply((dx, dy, c) => ({ x: c.x + dx * ca - dy * sa, y: c.y + dx * sa + dy * ca }));
+}
+// bend the design like it is wrapped around a round arm seen from the front
+function curveGrid() {
+  if (!G) return;
+  const f = gridFrame(), c = gridCenter(), vx = -f.uy, vy = f.ux, half = f.wd / 2, R = half * 1.08;
+  G = G.map(p => {
+    const dx = p.x - c.x, dy = p.y - c.y, lx = dx * f.ux + dy * f.uy, ly = dx * vx + dy * vy;
+    const t = clamp(lx / R, -1.45, 1.45), nlx = R * Math.sin(t), nly = ly + (1 - Math.cos(t)) * half * .16;
+    return { x: c.x + nlx * f.ux + nly * vx, y: c.y + nlx * f.uy + nly * vy };
+  });
+  dirty = true;
+}
+function flattenGrid() { if (!G) return; const f = gridFrame(), c = gridCenter(); initGrid(c.x, c.y, Math.max(f.wd, f.ht), f.ang); }
+// smooth surface through the 16 points (Catmull-Rom), so bends have no kinks
+const crs = (a, b, c, d, t) => { const t2 = t * t, t3 = t2 * t; return .5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3); };
+function evalMesh() {
+  const E = [];
+  for (let r = 0; r < 6; r++) E.push(new Array(6));
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) E[r + 1][c + 1] = G[r * 4 + c];
+  const ext = (p, q) => ({ x: 2 * p.x - q.x, y: 2 * p.y - q.y });
+  for (let c = 1; c <= 4; c++) { E[0][c] = ext(E[1][c], E[2][c]); E[5][c] = ext(E[4][c], E[3][c]); }
+  for (let r = 0; r < 6; r++) { E[r][0] = ext(E[r][1], E[r][2]); E[r][5] = ext(E[r][4], E[r][3]); }
+  const P = [];
+  for (let a = 0; a <= MESH; a++) for (let b = 0; b <= MESH; b++) {
+    const u = b / MESH * 3, v = a / MESH * 3, i = Math.min(2, Math.floor(u)), j = Math.min(2, Math.floor(v)), tu = u - i, tv = v - j;
+    const xs = [], ys = [];
+    for (let k = 0; k < 4; k++) { const row = E[j + k]; xs.push(crs(row[i].x, row[i + 1].x, row[i + 2].x, row[i + 3].x, tu)); ys.push(crs(row[i].y, row[i + 1].y, row[i + 2].y, row[i + 3].y, tu)); }
+    P.push({ x: crs(xs[0], xs[1], xs[2], xs[3], tv), y: crs(ys[0], ys[1], ys[2], ys[3], tv) });
+  }
+  return P;
+}
+function drawTri(img, s0, s1, s2, d0, d1, d2) {
+  const cx = (d0.x + d1.x + d2.x) / 3, cy = (d0.y + d1.y + d2.y) / 3;
+  const grow = p => { const dx = p.x - cx, dy = p.y - cy, l = Math.hypot(dx, dy) || 1; return { x: p.x + dx / l * .7, y: p.y + dy / l * .7 }; };
+  const e0 = grow(d0), e1 = grow(d1), e2 = grow(d2);
+  const u1x = s1.x - s0.x, u1y = s1.y - s0.y, u2x = s2.x - s0.x, u2y = s2.y - s0.y;
+  const den = u1x * u2y - u2x * u1y; if (Math.abs(den) < 1e-6) return;
+  const v1x = d1.x - d0.x, v1y = d1.y - d0.y, v2x = d2.x - d0.x, v2y = d2.y - d0.y;
+  const a = (v1x * u2y - v2x * u1y) / den, c = (v2x * u1x - v1x * u2x) / den;
+  const b = (v1y * u2y - v2y * u1y) / den, d = (v2y * u1x - v1y * u2x) / den;
+  const e = d0.x - a * s0.x - c * s0.y, f = d0.y - b * s0.x - d * s0.y;
+  tctx.save();
+  tctx.beginPath(); tctx.moveTo(e0.x, e0.y); tctx.lineTo(e1.x, e1.y); tctx.lineTo(e2.x, e2.y); tctx.closePath(); tctx.clip();
+  tctx.setTransform(a, b, c, d, e, f);
+  tctx.drawImage(img, 0, 0);
+  tctx.restore();
+}
+function drawWarp(P) {
+  tctx.setTransform(1, 0, 0, 1, 0, 0); tctx.globalCompositeOperation = 'source-over'; tctx.globalAlpha = 1;
+  tctx.clearRect(0, 0, W, H);
+  const n = MESH, sw = designCanvas.width / n, fx = x => F.flip ? designCanvas.width - x : x;
+  for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
+    const p00 = P[a * (n + 1) + b], p01 = P[a * (n + 1) + b + 1], p10 = P[(a + 1) * (n + 1) + b], p11 = P[(a + 1) * (n + 1) + b + 1];
+    const s00 = { x: fx(b * sw), y: a * sw }, s01 = { x: fx((b + 1) * sw), y: a * sw }, s10 = { x: fx(b * sw), y: (a + 1) * sw }, s11 = { x: fx((b + 1) * sw), y: (a + 1) * sw };
+    drawTri(designCanvas, s00, s01, s11, p00, p01, p11);
+    drawTri(designCanvas, s00, s11, s10, p00, p11, p10);
+  }
+}
+// the same ink-under-skin look as the live view, applied to the bent design
+function inkOver(x0, y0, w, h, S) {
+  const look = LOOKS[F.look] || LOOKS.healed;
+  const T = tctx.getImageData(x0, y0, w, h).data, Bi = fctx.getImageData(x0, y0, w, h), B = Bi.data, n = w * h;
+  const lum = buf('lum', n), lb = buf('lb', n), a = buf('a', n), ab = buf('ab', n);
+  const sk = skinReady && F.clip ? skin : null, aw = anaC.width, ah = anaC.height, ss = aw / W;
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    lum[i] = .299 * B[j] + .587 * B[j + 1] + .114 * B[j + 2];
+    let A = T[j + 3] / 255;
+    if (sk && A > 0) {
+      const x = i % w, y = (i / w) | 0;
+      const k = clamp(Math.round((y + y0) * ss), 0, ah - 1) * aw + clamp(Math.round((x + x0) * ss), 0, aw - 1);
+      A *= clamp((sk[k] - .25) / .5, 0, 1);
+    }
+    a[i] = A;
+  }
+  boxBlur(lum, lb, w, h, Math.max(2, Math.round(S * .035)));
+  if (look.halo > 0) boxBlur(a, ab, w, h, Math.max(2, Math.round(S * .02)));
+  const disp = F.disp * S / 900, dens = look.dens * F.op, shine = F.tex * 3, tint = look.tint;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x, j = i * 4;
+    const gx = lb[i + 1] - lb[i - 1], gy = lb[i + w] - lb[i - w];
+    const sx = clamp(x - gx * disp, 0, w - 1.001), sy = clamp(y - gy * disp, 0, h - 1.001);
+    const ix = sx | 0, iy = sy | 0, fx = sx - ix, fy = sy - iy, q = iy * w + ix;
+    const A = (a[q] * (1 - fx) + a[q + 1] * fx) * (1 - fy) + (a[q + w] * (1 - fx) + a[q + w + 1] * fx) * fy;
+    const halo = look.halo > 0 ? Math.max(0, ab[i] - a[i]) * look.halo : 0;
+    if (A < .004 && halo < .004) continue;
+    const qq = q * 4, aD = A * dens, detail = lum[i] - lb[i];
+    const hl = detail > 0 ? detail * shine * A : 0, grain = (Math.random() - .5) * 6;
+    for (let c = 0; c < 3; c++) {
+      const t = Math.max(.05, T[qq + c] / 255) * tint[c];
+      let o = B[j + c] * (1 - aD * (1 - Math.min(1, t))) + hl;
+      if (c === 0) o += halo * 28; else o -= halo * (c === 1 ? 10 : 6);
+      o += grain * A;
+      B[j + c] = o < 0 ? 0 : o > 255 ? 255 : o;
+    }
+  }
+  octx.putImageData(Bi, x0, y0);
+}
+function trainSkinAt(c, r) {
+  if (!hasPhoto) return;
+  const aw = anaC.width, ah = anaC.height, s = aw / W;
+  actx.drawImage(frameC, 0, 0, aw, ah);
+  const d = actx.getImageData(0, 0, aw, ah).data;
+  let n = 0, sr = 0, sb = 0, srr = 0, sbb = 0;
+  const pts = [[0, 0], [-r, 0], [r, 0], [0, -r], [0, r]];
+  pts.forEach(([ox, oy]) => {
+    const cx = Math.round((c.x + ox) * s), cy = Math.round((c.y + oy) * s);
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const x = cx + dx, y = cy + dy; if (x < 0 || y < 0 || x >= aw || y >= ah) continue;
+      const k = (y * aw + x) * 4, cr = toCr(d[k], d[k + 1], d[k + 2]), cb = toCb(d[k], d[k + 1], d[k + 2]);
+      if (cr < 133 || cr > 178 || cb < 78 || cb > 128) continue;   // only learn from pixels that look like skin
+      n++; sr += cr; sb += cb; srr += cr * cr; sbb += cb * cb;
+    }
+  });
+  if (n < 12) return;
+  const mr = sr / n, mb = sb / n;
+  skinModel = { cr: mr, cb: mb, sr: clamp(Math.sqrt(Math.max(srr / n - mr * mr, 0)), 6, 9), sb: clamp(Math.sqrt(Math.max(sbb / n - mb * mb, 0)), 6, 9) };
+  skin = null; analyzeSkin(); analyzeSkin(); analyzeSkin();
+}
+function dispScale() { const r = out.getBoundingClientRect(); return Math.min(r.width / W, r.height / H) || 1; }
+function renderPhoto(withGrid) {
+  octx.setTransform(1, 0, 0, 1, 0, 0); octx.globalCompositeOperation = 'source-over'; octx.globalAlpha = 1;
+  if (!hasPhoto) { octx.fillStyle = '#000'; octx.fillRect(0, 0, out.width, out.height); return; }
+  octx.drawImage(frameC, 0, 0);
+  if (!G || compare) return;
+  const P = evalMesh();
+  if (designCanvas) {
+    drawWarp(P);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    P.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+    x0 = Math.max(0, Math.floor(x0 - 6)); y0 = Math.max(0, Math.floor(y0 - 6));
+    x1 = Math.min(W, Math.ceil(x1 + 6)); y1 = Math.min(H, Math.ceil(y1 + 6));
+    if (x1 - x0 > 4 && y1 - y0 > 4) inkOver(x0, y0, x1 - x0, y1 - y0, gridFrame().wd);
+  }
+  if (withGrid) {
+    const k = 1 / dispScale();
+    octx.lineWidth = 1.5 * k;
+    const line = pts => { octx.beginPath(); pts.forEach((p, i) => i ? octx.lineTo(p.x, p.y) : octx.moveTo(p.x, p.y)); octx.stroke(); };
+    octx.strokeStyle = 'rgba(166,149,255,.9)';
+    for (let r = 0; r <= MESH; r += MESH / 3) line(P.slice(r * (MESH + 1), (r + 1) * (MESH + 1)));
+    for (let c = 0; c <= MESH; c += MESH / 3) { const col = []; for (let r = 0; r <= MESH; r++) col.push(P[r * (MESH + 1) + c]); line(col); }
+    G.forEach(p => {
+      octx.beginPath(); octx.arc(p.x, p.y, 9 * k, 0, Math.PI * 2);
+      octx.fillStyle = 'rgba(255,255,255,.95)'; octx.fill();
+      octx.lineWidth = 2 * k; octx.strokeStyle = '#5a3fd6'; octx.stroke();
+    });
+    // centre handle: drag here to move the whole design
+    const gc = gridCenter();
+    octx.beginPath(); octx.arc(gc.x, gc.y, 13 * k, 0, Math.PI * 2);
+    octx.fillStyle = 'rgba(90,63,214,.92)'; octx.fill();
+    octx.strokeStyle = '#fff'; octx.lineWidth = 2 * k;
+    octx.beginPath();
+    octx.moveTo(gc.x - 7 * k, gc.y); octx.lineTo(gc.x + 7 * k, gc.y);
+    octx.moveTo(gc.x, gc.y - 7 * k); octx.lineTo(gc.x, gc.y + 7 * k);
+    octx.stroke();
+  }
+}
+function inside(p) {
+  const ring = [0, 1, 2, 3, 7, 11, 15, 14, 13, 12, 8, 4].map(i => G[i]);
+  let inn = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inn = !inn;
+  }
+  return inn;
+}
+function photoDown(e) {
+  if (!hasPhoto || !G) return;
+  try { out.setPointerCapture(e.pointerId); } catch (err) {}
+  const p = toCanvas(e), lim = 28 / dispScale();
+  let best = -1, bd = Infinity;
+  G.forEach((g, i) => { if (!showGrid) return; const d = Math.hypot(g.x - p.x, g.y - p.y); if (d < bd) { bd = d; best = i; } });
+  const gc = gridCenter();
+  if (Math.hypot(gc.x - p.x, gc.y - p.y) < lim * .85) pdrag = { type: 'move', last: p };
+  else if (best >= 0 && bd < lim) pdrag = { type: 'pt', i: best };
+  else {
+    if (!inside(p)) { const c = gridCenter(); gridApply((dx, dy) => ({ x: p.x + dx, y: p.y + dy })); }
+    pdrag = { type: 'move', last: p };
+  }
+  dirty = true;
+}
+function photoMove(e) {
+  if (!pdrag) return;
+  const p = toCanvas(e);
+  if (pdrag.type === 'pt') G[pdrag.i] = { x: p.x, y: p.y };
+  else { const dx = p.x - pdrag.last.x, dy = p.y - pdrag.last.y; G = G.map(g => ({ x: g.x + dx, y: g.y + dy })); pdrag.last = p; }
+  dirty = true;
+}
+function enterPhoto(fromLive) {
+  photoMode = true;
+  const live = fromLive && stream && W && vid.videoWidth;
+  let still = null, place = cur ? { ...cur } : null;
+  if (live) { still = document.createElement('canvas'); still.width = W; still.height = H; still.getContext('2d').drawImage(frameC, 0, 0); }
+  stopCam();
+  $('#btnMode').setAttribute('aria-pressed', 'true'); $('#btnMode').textContent = 'Live';
+  $('#btnFlipCam').hidden = true; $('#btnPause').hidden = true; $('#spots').hidden = true; $('#photoBar').hidden = false;
+  $('#spotHint').textContent = 'Drag the dots to bend the design to the arm. Drag inside the grid to move it.';
+  out.style.objectFit = 'contain';
+  F.clip = true; $('#clip').checked = true;
+  if (still) {
+    setPhoto(still);
+    if (place) initGrid(place.x, place.y, place.size, (place.ang || 0) + (place.roll || 0));
+  } else if (!hasPhoto) $('#photoIn').click();
+  dirty = true; status();
+}
+function exitPhoto() {
+  photoMode = false; pdrag = null;
+  $('#btnMode').setAttribute('aria-pressed', 'false'); $('#btnMode').textContent = 'Photo';
+  $('#btnFlipCam').hidden = false; $('#btnPause').hidden = false; $('#spots').hidden = false; $('#photoBar').hidden = true;
+  out.style.objectFit = '';
+  F.clip = true; $('#clip').checked = true;
+  W = 0; H = 0; cur = null; resetLock(); renderSpots();
+  if (paused) $('#btnPause').click();
+  startCam().then(ok => { if (!ok) $('#intro').hidden = false; });
+}
+$('#btnMode').addEventListener('click', () => { if (photoMode) exitPhoto(); else enterPhoto(true); });
+$('#btnIntroPhoto').addEventListener('click', () => { $('#intro').hidden = true; enterPhoto(false); });
+$('#btnNewPhoto').addEventListener('click', () => $('#photoIn').click());
+$('#btnCurve').addEventListener('click', curveGrid);
+$('#btnFlatten').addEventListener('click', flattenGrid);
+$('#btnGrid').addEventListener('click', e => { showGrid = !showGrid; e.currentTarget.textContent = showGrid ? 'Hide grid' : 'Show grid'; e.currentTarget.setAttribute('aria-pressed', showGrid); dirty = true; });
+$('#photoIn').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const url = URL.createObjectURL(f);
+  try { const img = await loadImage(url); setPhoto(img); }
+  catch (err) { $('#pillText').textContent = 'That photo could not be opened. Try a JPG or PNG.'; }
+  finally { URL.revokeObjectURL(url); }
+});
+$('#sz').addEventListener('input', () => { if (photoMode) gridScaleTo(); });
+$('#rot').addEventListener('input', () => { if (photoMode) gridRotateTo(); });
+$('.sheet').addEventListener('input', () => { dirty = true; });
+$('.sheet').addEventListener('click', () => { dirty = true; });
+['pointerdown', 'pointerup', 'pointerleave', 'pointercancel', 'keydown', 'keyup'].forEach(ev => cmp.addEventListener(ev, () => { dirty = true; }));
+window.addEventListener('resize', () => { dirty = true; });
+
 /* test hook: ?debug lets an automated check supply hand points */
-if (/[?&]debug\b/.test(location.search)) window.inkfitDebug = { setHand: pts => { debugHand = pts; }, state: () => ({ cur, trackInfo, skinModel, anchor, hasTpl: !!tpl, pinned }) };
+if (/[?&]debug\b/.test(location.search)) window.inkfitDebug = { setHand: pts => { debugHand = pts; }, state: () => ({ cur, trackInfo, skinModel, anchor, hasTpl: !!tpl, pinned, G, clip: F.clip, skinReady, skinAt: (x, y) => skin ? skin[Math.round(y * anaC.width / W) * anaC.width + Math.round(x * anaC.width / W)] : null }), setGrid: g => { G = g; dirty = true; } };
 
 /* ---------- start ---------- */
 syncUI(); renderSpots(); renderStrip();
