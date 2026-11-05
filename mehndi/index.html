@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#120c0a">
+<title>Mehndi Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rozha+One&family=Hind:wght@400;500;600&display=swap">
+<style>
+/* Layout: full-bleed camera stage, slim status bar on top, compact sheet with style, colour and actions below. Dark camera UI with a henna accent. */
+:root{
+  --bg:#120c0a; --panel:rgba(24,16,13,.86); --solid:#1f1512; --ink:#f6efe9; --muted:#b9a79c;
+  --line:rgba(255,235,220,.14); --accent:#d9772f; --accent-fg:#1d0e05; --good:#8fd49a; --warn:#ffcf7a; --paper:#fbf6f1;
+  --font-display:'Rozha One',Georgia,serif;
+  --font-body:'Hind',system-ui,-apple-system,'Segoe UI',sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 var(--font-body);overflow:hidden;-webkit-tap-highlight-color:transparent}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#stage{position:fixed;inset:0;background:#000}
+#out{display:block;width:100%;height:100%;object-fit:cover;touch-action:none}
+#vid{position:absolute;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
+.top{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;gap:8px;
+  padding:calc(8px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 16px max(12px,env(safe-area-inset-left,0px));
+  background:linear-gradient(rgba(0,0,0,.6),rgba(0,0,0,0))}
+.mark{font:400 22px/1 var(--font-display);color:var(--accent)}
+.pill{display:inline-flex;align-items:center;gap:7px;min-width:0;font-size:12.5px;font-weight:500;background:rgba(0,0,0,.55);border:1px solid var(--line);padding:5px 10px;border-radius:99px;white-space:nowrap;overflow:hidden}
+.pill span:last-child{overflow:hidden;text-overflow:ellipsis}
+.dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--warn)}
+.pill[data-s="ok"] .dot{background:var(--good)}
+.sp{flex:1}
+.ib{flex:none;height:36px;border-radius:99px;border:1px solid var(--line);background:rgba(0,0,0,.5);padding:0 12px;font-weight:600;font-size:12.5px;cursor:pointer}
+.ib[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--panel);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line);
+  padding:8px max(12px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));max-height:60vh;overflow-y:auto}
+.inner{max-width:780px;margin:0 auto;display:grid;gap:8px}
+.scroll{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px}
+.scroll::-webkit-scrollbar{display:none}
+.chip{flex:none;display:grid;gap:4px;justify-items:center;background:none;border:0;padding:0;cursor:pointer;width:68px}
+.chip .art{width:64px;height:64px;border-radius:10px;background:var(--paper);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden}
+.chip .art canvas{width:100%;height:100%}
+.chip span{font-size:11.5px;color:var(--muted);line-height:1.15;text-align:center}
+.chip[aria-pressed="true"] .art{outline:2px solid var(--accent);outline-offset:2px}
+.chip[aria-pressed="true"] span{color:var(--ink)}
+.colors{display:flex;gap:8px;flex-wrap:wrap}
+.cc{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:transparent;border-radius:99px;padding:6px 12px 6px 8px;font-size:13px;font-weight:500;cursor:pointer}
+.cc i{width:16px;height:16px;border-radius:50%}
+.cc[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{min-height:40px;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:var(--solid);font-weight:600;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn:disabled{opacity:.5}
+.adj{margin-left:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 22px;padding-top:8px;border-top:1px solid var(--line)}
+.ctl{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:baseline}
+.ctl label{font-size:12px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.ctl output{font-size:12px;font-variant-numeric:tabular-nums}
+.ctl input{grid-column:1/-1;width:100%;margin:0;min-height:28px;accent-color:var(--accent)}
+.chk{display:flex;align-items:center;gap:8px;font-size:14px}
+.chk input{width:18px;height:18px;accent-color:var(--accent)}
+.overlay{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(10,7,6,.94);
+  padding:calc(20px + env(safe-area-inset-top,0px)) max(18px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px));overflow-y:auto}
+#intro{background:var(--bg)}
+.card{width:100%;max-width:440px;display:grid;gap:14px}
+.card h1{font:400 50px/1 var(--font-display);margin:0;color:var(--ink)}
+.card h1 em{font-style:normal;color:var(--accent)}
+.card p{margin:0;color:var(--muted);line-height:1.5}
+.card ol{margin:0;padding-left:20px;color:var(--muted);display:grid;gap:5px}
+.hero{width:100%;max-width:300px;justify-self:center}
+.msg{min-height:1.3em;color:var(--warn)!important;font-size:13px}
+.shot img{width:100%;max-height:68vh;object-fit:contain;border-radius:10px;background:#000}
+a.btn{text-decoration:none;display:inline-grid;place-items:center}
+@media (min-width:900px){.sheet{left:auto;right:16px;bottom:16px;width:420px;border:1px solid var(--line);border-radius:16px;max-height:calc(100vh - 100px)}#out{object-fit:contain}}
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="vid" playsinline muted autoplay></video>
+  <canvas id="out" aria-label="Camera view with mehndi preview"></canvas>
+</div>
+
+<header class="top">
+  <span class="mark">Mehndi</span>
+  <span class="pill" id="pill"><span class="dot"></span><span id="pillText">Starting…</span></span>
+  <span class="sp"></span>
+  <button class="ib" id="btnPhoto" type="button">Photo</button>
+  <button class="ib" id="btnFlip" type="button" aria-label="Switch camera">Switch</button>
+  <button class="ib" id="btnPause" type="button" aria-pressed="false">Freeze</button>
+</header>
+
+<section class="sheet" aria-label="Mehndi controls">
+  <div class="inner">
+    <div class="scroll" id="styles" role="group" aria-label="Design"></div>
+    <div class="colors" id="colors" role="group" aria-label="Henna colour"></div>
+    <div class="bar">
+      <button class="btn primary" id="btnShot" type="button">Take picture</button>
+      <button class="btn" id="btnCompare" type="button">Hold: bare hand</button>
+      <button class="btn adj" id="btnAdjust" type="button" aria-expanded="false" aria-controls="adjust">Adjust</button>
+    </div>
+    <div class="grid" id="adjust" hidden>
+      <div class="ctl"><label for="inten">Darkness</label><output id="intenO"></output><input id="inten" type="range" min="40" max="100" value="88"></div>
+      <div class="ctl"><label for="steady">Steadiness</label><output id="steadyO"></output><input id="steady" type="range" min="0" max="90" value="55"></div>
+      <div style="display:grid;gap:8px">
+        <label class="chk"><input type="checkbox" id="fArm" checked> Extend onto the forearm</label>
+        <label class="chk"><input type="checkbox" id="fClip" checked> Keep on skin only</label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="overlay" id="intro">
+  <div class="card">
+    <canvas class="hero" id="hero" width="600" height="600" aria-hidden="true"></canvas>
+    <h1>Try your <em>mehndi</em> before the day</h1>
+    <p>See bridal, Arabic and simple mehndi designs on your own hand through the camera.</p>
+    <ol>
+      <li>Use bright light and show one open hand, fingers apart.</li>
+      <li>Pick a design. Use "Back" designs when the back of your hand faces the camera.</li>
+      <li>Tap Take picture to save or share it.</li>
+    </ol>
+    <button class="btn primary" id="btnStart" type="button">Start camera</button>
+    <button class="btn" id="btnIntroPhoto" type="button">Use a photo of my hand</button>
+    <p class="msg" id="introMsg" role="status"></p>
+    <p style="font-size:12.5px">Everything stays on your phone. Nothing is recorded or uploaded.</p>
+  </div>
+</div>
+
+<div class="overlay" id="shotView" hidden>
+  <div class="card shot">
+    <img id="shotImg" alt="Your mehndi preview">
+    <div class="bar">
+      <a class="btn primary" id="shotSave" download="mehndi-preview.png" href="#">Save</a>
+      <button class="btn" id="shotShare" type="button" hidden>Share</button>
+      <button class="btn" id="shotClose" type="button">Back</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="photoIn" accept="image/*" hidden>
+
+<script type="module">
+const TV = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+const $ = s => document.querySelector(s);
+const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const TAU = Math.PI * 2;
+
+/* =====================================================================
+   1. Mehndi artwork, drawn as black line art on transparent canvases.
+   Palm and back pieces are 512 x 512 (left edge = index-finger side,
+   top edge = finger bases, bottom = wrist). Finger strips are 64 x 288
+   (top = fingertip). Wrist band 512 x 80. Forearm strip 160 x 512.
+   ===================================================================== */
+function mk(w, h, lw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d'); x.lineCap = 'round'; x.lineJoin = 'round'; x.strokeStyle = '#000'; x.fillStyle = '#000'; x.lineWidth = lw || 3;
+  return [c, x];
+}
+function petal(x, cx, cy, ang, r0, r1, w, opts = {}) {
+  const L = r1 - r0;
+  x.save(); x.translate(cx, cy); x.rotate(ang);
+  x.beginPath(); x.moveTo(0, -r0);
+  x.bezierCurveTo(w, -r0 - L * .25, w * .75, -r0 - L * .8, 0, -r1);
+  x.bezierCurveTo(-w * .75, -r0 - L * .8, -w, -r0 - L * .25, 0, -r0);
+  x.closePath();
+  if (opts.fill) x.fill(); else x.stroke();
+  if (opts.vein) { x.beginPath(); x.moveTo(0, -r0 - L * .18); x.lineTo(0, -r1 + L * .2); x.stroke(); }
+  if (opts.inner) {
+    x.beginPath(); x.moveTo(0, -r0 - L * .2);
+    x.bezierCurveTo(w * .5, -r0 - L * .38, w * .4, -r0 - L * .72, 0, -r1 + L * .16);
+    x.bezierCurveTo(-w * .4, -r0 - L * .72, -w * .5, -r0 - L * .38, 0, -r0 - L * .2); x.stroke();
+  }
+  x.restore();
+}
+function petalRing(x, cx, cy, n, r0, r1, w, opts = {}) { for (let i = 0; i < n; i++) petal(x, cx, cy, (i + (opts.offset || 0)) / n * TAU, r0, r1, w, opts); }
+function circle(x, cx, cy, r, fill) { x.beginPath(); x.arc(cx, cy, r, 0, TAU); fill ? x.fill() : x.stroke(); }
+function dotRing(x, cx, cy, r, n, dr, off = 0) { for (let i = 0; i < n; i++) { const a = (i + off) / n * TAU; circle(x, cx + Math.cos(a) * r, cy + Math.sin(a) * r, dr, true); } }
+function scallopRing(x, cx, cy, r, n) {
+  const sr = r * Math.sin(Math.PI / n);
+  for (let i = 0; i < n; i++) { const a = (i + .5) / n * TAU; x.beginPath(); x.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, sr, a - Math.PI / 2, a + Math.PI / 2); x.stroke(); }
+}
+function lattice(x, clipFn, s, x0, y0, x1, y1, lw) {
+  x.save(); x.beginPath(); clipFn(); x.clip(); const old = x.lineWidth; x.lineWidth = lw || old * .6;
+  x.beginPath();
+  for (let k = -(y1 - y0); k < (x1 - x0) + (y1 - y0); k += s) { x.moveTo(x0 + k, y0); x.lineTo(x0 + k + (y1 - y0), y1); x.moveTo(x0 + k, y1); x.lineTo(x0 + k + (y1 - y0), y0); }
+  x.stroke(); x.lineWidth = old; x.restore();
+}
+function latticeRing(x, cx, cy, r0, r1, s) {
+  lattice(x, () => { x.arc(cx, cy, r1, 0, TAU); x.arc(cx, cy, r0, 0, TAU, true); }, s, cx - r1, cy - r1, cx + r1, cy + r1);
+  circle(x, cx, cy, r0); circle(x, cx, cy, r1);
+}
+function paisley(x, cx, cy, size, ang, fillCore = true) {
+  x.save(); x.translate(cx, cy); x.rotate(ang); const k = size / 44; x.scale(k, k); const lw = x.lineWidth; x.lineWidth = lw / k;
+  const shape = s => { x.beginPath(); x.moveTo(0, 30 * s); x.bezierCurveTo(-26 * s, 28 * s, -30 * s, -4 * s, -12 * s, -18 * s); x.bezierCurveTo(-2 * s, -26 * s, 10 * s, -34 * s, 6 * s, -44 * s); x.bezierCurveTo(22 * s, -34 * s, 28 * s, -10 * s, 24 * s, 6 * s); x.bezierCurveTo(20 * s, 22 * s, 10 * s, 30 * s, 0, 30 * s); x.closePath(); };
+  shape(1); x.stroke();
+  x.save(); x.translate(2, 4); shape(.66); x.stroke(); x.restore();
+  if (fillCore) { x.save(); x.translate(3, 8); shape(.3); x.fill(); x.restore(); }
+  for (let i = 0; i < 6; i++) { const a = -2.2 + i * .52; circle(x, Math.cos(a) * 40 - 2, Math.sin(a) * 32 + 2, 3, true); }
+  x.lineWidth = lw; x.restore();
+}
+function leaf(x, cx, cy, len, ang, fill) {
+  x.save(); x.translate(cx, cy); x.rotate(ang);
+  x.beginPath(); x.moveTo(0, 0); x.quadraticCurveTo(len * .5, -len * .32, len, 0); x.quadraticCurveTo(len * .5, len * .32, 0, 0); x.closePath();
+  if (fill) x.fill(); else { x.stroke(); x.beginPath(); x.moveTo(len * .1, 0); x.lineTo(len * .85, 0); x.stroke(); }
+  x.restore();
+}
+function vine(x, pts, leafEvery, leafLen) {
+  // pts: cubic bezier [p0, c1, c2, p1]
+  const [p0, c1, c2, p1] = pts, at = t => { const m = 1 - t; return { x: m * m * m * p0.x + 3 * m * m * t * c1.x + 3 * m * t * t * c2.x + t * t * t * p1.x, y: m * m * m * p0.y + 3 * m * m * t * c1.y + 3 * m * t * t * c2.y + t * t * t * p1.y }; };
+  x.beginPath(); x.moveTo(p0.x, p0.y); x.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, p1.x, p1.y); x.stroke();
+  let side = 1;
+  for (let t = leafEvery; t < 1; t += leafEvery) {
+    const a = at(t), b = at(Math.min(1, t + .01)), dir = Math.atan2(b.y - a.y, b.x - a.x);
+    leaf(x, a.x, a.y, leafLen, dir + side * 1.0, side > 0); side = -side;
+  }
+}
+function flower(x, cx, cy, r, n = 6) { petalRing(x, cx, cy, n, r * .3, r, r * .38); circle(x, cx, cy, r * .22, true); }
+function mandala(x, cx, cy, R, rich) {
+  circle(x, cx, cy, R * .07, true);
+  petalRing(x, cx, cy, 8, R * .09, R * .2, R * .05);
+  dotRing(x, cx, cy, R * .24, 14, R * .02);
+  petalRing(x, cx, cy, 12, R * .27, R * .46, R * .085, { vein: true });
+  circle(x, cx, cy, R * .48);
+  if (rich) latticeRing(x, cx, cy, R * .5, R * .62, R * .065);
+  else dotRing(x, cx, cy, R * .55, 20, R * .02);
+  scallopRing(x, cx, cy, R * .67, 22);
+  dotRing(x, cx, cy, R * .75, 22, R * .022);
+  petalRing(x, cx, cy, 16, R * .77, R, R * .11, { inner: true });
+  dotRing(x, cx, cy, R * .9, 16, R * .02, .5);
+}
+// finger strips -------------------------------------------------------
+function tipCap(x, h) {
+  x.beginPath(); x.moveTo(0, h); x.lineTo(0, 10); x.quadraticCurveTo(0, 0, 10, 0); x.lineTo(54, 0); x.quadraticCurveTo(64, 0, 64, 10); x.lineTo(64, h);
+  for (let i = 4; i >= 0; i--) x.arc(6.4 + i * 12.8, h, 6.4, 0, Math.PI, false);
+  x.closePath(); x.fill();
+}
+function hBand(x, y) { x.beginPath(); x.moveTo(3, y); x.lineTo(61, y); x.moveTo(3, y + 6); x.lineTo(61, y + 6); x.stroke(); }
+function fingerBridal() {
+  const [c, x] = mk(64, 288, 4.2);
+  tipCap(x, 46); hBand(x, 60);
+  lattice(x, () => x.rect(4, 72, 56, 54), 13, 4, 72, 60, 126);
+  hBand(x, 128);
+  for (let y = 146; y < 196; y += 16) { x.beginPath(); x.moveTo(8, y); x.lineTo(32, y + 8); x.lineTo(56, y); x.stroke(); }
+  hBand(x, 202);
+  flower(x, 32, 244, 22, 6);
+  dotRing(x, 32, 244, 27, 9, 2.6);
+  return c;
+}
+function fingerMinimal() {
+  const [c, x] = mk(64, 288, 4.2);
+  tipCap(x, 40); hBand(x, 150);
+  for (let i = 0; i < 4; i++) circle(x, 14 + i * 12, 172, 3.4, true);
+  return c;
+}
+function fingerArabic(main) {
+  const [c, x] = mk(64, 288, 4.2);
+  tipCap(x, main ? 38 : 34);
+  if (main) {
+    vine(x, [{ x: 32, y: 50 }, { x: 8, y: 110 }, { x: 56, y: 190 }, { x: 30, y: 286 }], .13, 20);
+    flower(x, 32, 120, 14, 5);
+  }
+  return c;
+}
+function fingerBack() {
+  const [c, x] = mk(64, 288, 4.2);
+  hBand(x, 52);
+  flower(x, 32, 118, 16, 6);
+  // ring band on the lower segment
+  x.beginPath(); x.moveTo(3, 204); x.lineTo(61, 204); x.moveTo(3, 230); x.lineTo(61, 230); x.stroke();
+  for (let i = 0; i < 5; i++) circle(x, 8 + i * 12, 217, 4.2, i % 2 === 0);
+  return c;
+}
+// wrist band and forearm ---------------------------------------------------
+function wristBand() {
+  const [c, x] = mk(512, 80, 4.6);
+  x.beginPath(); x.moveTo(0, 8); x.lineTo(512, 8); x.moveTo(0, 15); x.lineTo(512, 15); x.stroke();
+  for (let i = 0; i < 18; i++) { x.beginPath(); x.arc(14 + i * 28.6, 15, 14, 0, Math.PI); x.stroke(); circle(x, 14 + i * 28.6, 34, 3.4, true); }
+  lattice(x, () => x.rect(0, 40, 512, 22), 12, 0, 40, 512, 62);
+  x.beginPath(); x.moveTo(0, 40); x.lineTo(512, 40); x.moveTo(0, 62); x.lineTo(512, 62); x.moveTo(0, 70); x.lineTo(512, 70); x.stroke();
+  return c;
+}
+function forearmVine() {
+  const [c, x] = mk(160, 512, 5.5);
+  x.beginPath(); x.moveTo(80, 0); x.bezierCurveTo(30, 120, 130, 250, 80, 380); x.bezierCurveTo(55, 440, 90, 480, 80, 512); x.stroke();
+  paisley(x, 112, 90, 52, .5); paisley(x, 44, 230, 50, -.5); paisley(x, 112, 360, 46, .45);
+  flower(x, 52, 70, 18); flower(x, 112, 196, 16); flower(x, 52, 330, 15); flower(x, 96, 450, 13);
+  for (let y = 20; y < 500; y += 26) circle(x, y % 52 ? 22 : 138, y, 3.6, true);
+  // fade out towards the elbow
+  x.globalCompositeOperation = 'destination-in';
+  const g = x.createLinearGradient(0, 300, 0, 512); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 160, 512); x.globalCompositeOperation = 'source-over'; x.fillStyle = '#000';
+  return c;
+}
+// palm and back pieces -----------------------------------------------------
+const FX = [.1, .367, .633, .9].map(v => v * 512);       // finger bases along the top edge (index → little finger)
+function palmBridal() {
+  const [c, x] = mk(512, 512, 6);
+  mandala(x, 256, 290, 205, true);
+  paisley(x, 62, 84, 50, -.6); paisley(x, 450, 84, 50, .6);
+  paisley(x, 54, 470, 40, -2.4); paisley(x, 458, 470, 40, 2.4);
+  // arches under each finger
+  FX.forEach(fx => { x.beginPath(); x.arc(fx, 0, 40, 0, Math.PI); x.stroke(); x.beginPath(); x.arc(fx, 0, 30, 0, Math.PI); x.fill(); dotRing(x, fx, 0, 50, 14, 2, 0); });
+  return c;
+}
+function palmMinimal() {
+  const [c, x] = mk(512, 512, 6);
+  const cx = 256, cy = 300, R = 120;
+  circle(x, cx, cy, R * .1, true);
+  petalRing(x, cx, cy, 8, R * .14, R * .36, R * .08);
+  dotRing(x, cx, cy, R * .42, 14, 4);
+  petalRing(x, cx, cy, 12, R * .48, R * .86, R * .13, { vein: true });
+  circle(x, cx, cy, R * .9); dotRing(x, cx, cy, R, 20, 4.5);
+  return c;
+}
+function palmArabic() {
+  const [c, x] = mk(512, 512, 6);
+  // layered rose near the index finger
+  const rx = 140, ry = 150;
+  for (let k = 0; k < 3; k++) petalRing(x, rx, ry, 7 + k * 2, 18 + k * 32, 52 + k * 36, 16 + k * 9, { inner: k > 0, offset: k * .5 });
+  circle(x, rx, ry, 14, true);
+  x.lineWidth = 7;
+  vine(x, [{ x: 205, y: 225 }, { x: 330, y: 250 }, { x: 290, y: 420 }, { x: 470, y: 505 }], .11, 34);
+  x.lineWidth = 6;
+  paisley(x, 340, 330, 58, 2.3); paisley(x, 250, 410, 44, -.9);
+  flower(x, 420, 210, 30, 7); dotRing(x, 420, 210, 40, 14, 2);
+  for (let i = 0; i < 9; i++) circle(x, 60 + i * 14, 300 + i * 18, 2.5, true);
+  return c;
+}
+function backHaathPhool() {
+  const [c, x] = mk(512, 512, 6);
+  const cx = 256, cy = 300, R = 120;
+  mandala(x, cx, cy, R, false);
+  const chain = (ax, ay, bx, by) => {
+    const n = Math.max(4, Math.round(Math.hypot(bx - ax, by - ay) / 16));
+    for (let i = 0; i <= n; i++) { const t = i / n; circle(x, ax + (bx - ax) * t, ay + (by - ay) * t, i % 2 ? 2.4 : 4.4, i % 2 === 1); }
+  };
+  FX.forEach(fx => { const a = Math.atan2(0 - cy, fx - cx); chain(cx + Math.cos(a) * R, cy + Math.sin(a) * R, fx, 22); flower(x, fx, 18, 16); });
+  chain(cx - R, cy + 10, 14, 300); flower(x, 14, 300, 14);
+  chain(cx, cy + R, cx, 470);
+  x.beginPath(); x.moveTo(10, 478); x.quadraticCurveTo(256, 512, 502, 478); x.stroke();
+  for (let i = 0; i < 17; i++) circle(x, 26 + i * 29, 486 + Math.sin(i / 16 * Math.PI) * 10, 3.4, true);
+  return c;
+}
+function backBridal() {
+  const [c, x] = mk(512, 512, 6);
+  mandala(x, 256, 300, 180, true);
+  FX.forEach(fx => { x.beginPath(); x.arc(fx, 0, 34, 0, Math.PI); x.stroke(); dotRing(x, fx, 0, 44, 12, 2); });
+  paisley(x, 70, 120, 48, -.5); paisley(x, 442, 120, 48, .5);
+  return c;
+}
+const ART = {};
+function makeStyles() {
+  const fb = fingerBridal(), fm = fingerMinimal(), fa = fingerArabic(true), fe = fingerArabic(false), fk = fingerBack();
+  const wb = wristBand(), fv = forearmVine();
+  return {
+    bridal:  { label: 'Bridal palm',      palm: palmBridal(),    fingers: { thumb: fb, index: fb, middle: fb, ring: fb, pinky: fb }, wrist: wb, arm: fv },
+    arabic:  { label: 'Arabic',            palm: palmArabic(),    fingers: { thumb: fe, index: fa, middle: fe, ring: fe, pinky: fe }, wrist: null, arm: fv },
+    minimal: { label: 'Simple',            palm: palmMinimal(),   fingers: { thumb: fm, index: fm, middle: fm, ring: fm, pinky: fm }, wrist: null, arm: null },
+    phool:   { label: 'Back: haath phool', palm: backHaathPhool(), fingers: { thumb: fk, index: fk, middle: fk, ring: fk, pinky: fk }, wrist: wb, arm: null },
+    backBr:  { label: 'Back: bridal',      palm: backBridal(),    fingers: { thumb: fb, index: fb, middle: fb, ring: fb, pinky: fb }, wrist: wb, arm: fv },
+  };
+}
+const STYLES = makeStyles();
+const COLORS = {
+  paste: { label: 'Fresh paste', sw: '#3d2a17', rgb: [58, 40, 22] },
+  orange: { label: 'Day 1 stain', sw: '#c9651f', rgb: [205, 104, 38] },
+  deep: { label: 'Day 2 stain', sw: '#7a2a12', rgb: [122, 44, 20] },
+};
+let style = 'bridal', color = 'deep';
+
+/* =====================================================================
+   2. Placing the artwork on the hand (21 hand points from MediaPipe)
+   ===================================================================== */
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y }), add = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
+const mul = (a, k) => ({ x: a.x * k, y: a.y * k }), len = a => Math.hypot(a.x, a.y), norm = a => { const l = len(a) || 1; return { x: a.x / l, y: a.y / l }; };
+const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+let mctx = null;
+function tri(img, s0, s1, s2, d0, d1, d2) {
+  const cx = (d0.x + d1.x + d2.x) / 3, cy = (d0.y + d1.y + d2.y) / 3;
+  const grow = p => { const dx = p.x - cx, dy = p.y - cy, l = Math.hypot(dx, dy) || 1; return { x: p.x + dx / l * .6, y: p.y + dy / l * .6 }; };
+  const u1x = s1.x - s0.x, u1y = s1.y - s0.y, u2x = s2.x - s0.x, u2y = s2.y - s0.y, den = u1x * u2y - u2x * u1y;
+  if (Math.abs(den) < 1e-6) return;
+  const v1x = d1.x - d0.x, v1y = d1.y - d0.y, v2x = d2.x - d0.x, v2y = d2.y - d0.y;
+  const a = (v1x * u2y - v2x * u1y) / den, c = (v2x * u1x - v1x * u2x) / den, b = (v1y * u2y - v2y * u1y) / den, d = (v2y * u1x - v1y * u2x) / den;
+  const e0 = grow(d0), e1 = grow(d1), e2 = grow(d2);
+  mctx.save(); mctx.beginPath(); mctx.moveTo(e0.x, e0.y); mctx.lineTo(e1.x, e1.y); mctx.lineTo(e2.x, e2.y); mctx.closePath(); mctx.clip();
+  mctx.setTransform(a, b, c, d, d0.x - a * s0.x - c * s0.y, d0.y - b * s0.x - d * s0.y); mctx.drawImage(img, 0, 0); mctx.restore();
+}
+// map a whole texture onto a quad (tl, tr, bl, br) with an n x n mesh
+function quad(img, tl, tr, bl, br, n) {
+  const P = [];
+  for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+    const u = i / n, v = j / n, top = lerp(tl, tr, u), bot = lerp(bl, br, u);
+    P.push(lerp(top, bot, v));
+  }
+  const W = img.width, H = img.height;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const s00 = { x: i / n * W, y: j / n * H }, s10 = { x: (i + 1) / n * W, y: j / n * H }, s01 = { x: i / n * W, y: (j + 1) / n * H }, s11 = { x: (i + 1) / n * W, y: (j + 1) / n * H };
+    const p00 = P[j * (n + 1) + i], p10 = P[j * (n + 1) + i + 1], p01 = P[(j + 1) * (n + 1) + i], p11 = P[(j + 1) * (n + 1) + i + 1];
+    tri(img, s00, s10, s11, p00, p10, p11); tri(img, s00, s11, s01, p00, p11, p01);
+  }
+}
+// map a finger strip along a chain of joints (tip first), with a given width
+function strip(img, pts, width) {
+  const L = [0]; for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + len(sub(pts[i], pts[i - 1])));
+  const total = L[L.length - 1] || 1, W = img.width, H = img.height;
+  const normals = pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], d = norm(sub(b, a));
+    return { x: -d.y, y: d.x };
+  });
+  const left = pts.map((p, i) => add(p, mul(normals[i], width / 2))), right = pts.map((p, i) => add(p, mul(normals[i], -width / 2)));
+  for (let i = 0; i < pts.length - 1; i++) {
+    const v0 = L[i] / total * H, v1 = L[i + 1] / total * H;
+    tri(img, { x: 0, y: v0 }, { x: W, y: v0 }, { x: W, y: v1 }, left[i], right[i], right[i + 1]);
+    tri(img, { x: 0, y: v0 }, { x: W, y: v1 }, { x: 0, y: v1 }, left[i], right[i + 1], left[i + 1]);
+  }
+}
+function subdivide(pts, k) {
+  const out = [];
+  for (let i = 0; i < pts.length - 1; i++) for (let j = 0; j < k; j++) out.push(lerp(pts[i], pts[i + 1], j / k));
+  out.push(pts[pts.length - 1]); return out;
+}
+function drawMehndi(P) {
+  const st = STYLES[style];
+  const wrist = P[0], iM = P[5], mM = P[9], pM = P[17];
+  const across = norm(sub(iM, pM)), pw = len(sub(iM, pM));            // from little finger to index side
+  const down = norm(sub(wrist, mM));
+  // palm / back of hand
+  const tl = add(iM, mul(across, pw * .12)), tr = sub(pM, mul(across, pw * .12));
+  const bl = add(wrist, mul(across, pw * .5)), br = sub(wrist, mul(across, pw * .44));
+  quad(st.palm, tl, tr, bl, br, 5);
+  // fingers: base sits a little up from the knuckle, tip is extended past the last point
+  const fw = len(sub(P[5], P[9])) * .92;
+  const F = { index: [5, 6, 7, 8, 1], middle: [9, 10, 11, 12, 1.04], ring: [13, 14, 15, 16, .96], pinky: [17, 18, 19, 20, .82] };
+  for (const k in F) {
+    const [a, b, c2, d, wk] = F[k], w = fw * wk;
+    const tip = P[d], dir = norm(sub(P[d], P[c2]));
+    const chain = [add(tip, mul(dir, w * .42)), tip, P[c2], P[b], lerp(P[b], P[a], .55)];
+    strip(st.fingers[k], subdivide(chain, 2), w);
+  }
+  { const w = fw * 1.12, dir = norm(sub(P[4], P[3]));
+    strip(st.fingers.thumb, subdivide([add(P[4], mul(dir, w * .42)), P[4], P[3], lerp(P[3], P[2], .7)], 2), w); }
+  // wrist band and forearm
+  if (st.wrist) {
+    const c = add(wrist, mul(down, pw * .16)), hw = pw * .62, bh = pw * .2;
+    const a1 = add(c, mul(across, hw)), a2 = sub(c, mul(across, hw));
+    quad(st.wrist, a1, a2, add(a1, mul(down, bh)), add(a2, mul(down, bh)), 4);
+  }
+  if (st.arm && F_ARM) {
+    const top = add(wrist, mul(down, pw * (st.wrist ? .38 : .12))), hw = pw * .5, L = pw * 1.9;
+    const a1 = add(top, mul(across, hw)), a2 = sub(top, mul(across, hw));
+    quad(st.arm, a1, a2, add(a1, mul(down, L)), add(a2, mul(down, L)), 4);
+  }
+}
+
+/* =====================================================================
+   3. Henna rendering: stain sinks into the skin, fresh paste sits on top
+   ===================================================================== */
+const BUF = {};
+const buf = (k, n) => (BUF[k] && BUF[k].length >= n) ? BUF[k] : (BUF[k] = new Float32Array(n));
+function boxBlur(src, dst, w, h, r) {
+  const t = buf('bb', w * h);
+  for (let y = 0; y < h; y++) { const o = y * w; let s = 0; for (let x = -r; x <= r; x++) s += src[o + clamp(x, 0, w - 1)];
+    for (let x = 0; x < w; x++) { t[o + x] = s / (2 * r + 1); s += src[o + Math.min(x + r + 1, w - 1)] - src[o + Math.max(x - r, 0)]; } }
+  for (let x = 0; x < w; x++) { let s = 0; for (let y = -r; y <= r; y++) s += t[clamp(y, 0, h - 1) * w + x];
+    for (let y = 0; y < h; y++) { dst[y * w + x] = s / (2 * r + 1); s += t[Math.min(y + r + 1, h - 1) * w + x] - t[Math.max(y - r, 0) * w + x]; } }
+}
+const toCr = (r, g, b) => 128 + .5 * r - .4187 * g - .0813 * b, toCb = (r, g, b) => 128 - .1687 * r - .3313 * g + .5 * b;
+let skinModel = null;
+function learnSkin(P) {
+  // sample the middle of the palm
+  const c = lerp(lerp(P[0], P[9], .5), lerp(P[5], P[17], .5), .5), pw = len(sub(P[5], P[17]));
+  const pts = [c, lerp(c, P[5], .35), lerp(c, P[17], .35), lerp(c, P[0], .35), lerp(c, P[9], .3)];
+  // read only the palm area
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  pts.forEach(p => { bx0 = Math.min(bx0, p.x); by0 = Math.min(by0, p.y); bx1 = Math.max(bx1, p.x); by1 = Math.max(by1, p.y); });
+  const mg = pw * .1 + 4;
+  bx0 = clamp(Math.floor(bx0 - mg), 0, W - 1); by0 = clamp(Math.floor(by0 - mg), 0, H - 1); bx1 = clamp(Math.ceil(bx1 + mg), 1, W); by1 = clamp(Math.ceil(by1 + mg), 1, H);
+  const bw = bx1 - bx0, bh = by1 - by0; if (bw < 2 || bh < 2) return;
+  const d = fctx.getImageData(bx0, by0, bw, bh).data;
+  let n = 0, sr = 0, sb = 0, srr = 0, sbb = 0;
+  pts.forEach(p => {
+    for (let dy = -3; dy <= 3; dy += 3) for (let dx = -3; dx <= 3; dx += 3) {
+      const x = Math.round(p.x + dx * pw / 120) - bx0, y = Math.round(p.y + dy * pw / 120) - by0; if (x < 0 || y < 0 || x >= bw || y >= bh) continue;
+      const k = (y * bw + x) * 4, cr = toCr(d[k], d[k + 1], d[k + 2]), cb = toCb(d[k], d[k + 1], d[k + 2]);
+      if (cr < 130 || cr > 180 || cb < 75 || cb > 130) continue;
+      n++; sr += cr; sb += cb; srr += cr * cr; sbb += cb * cb;
+    }
+  });
+  if (n < 10) return;
+  const mr = sr / n, mb = sb / n;
+  const nm = { cr: mr, cb: mb, sr: clamp(Math.sqrt(Math.max(srr / n - mr * mr, 0)), 6, 10), sb: clamp(Math.sqrt(Math.max(sbb / n - mb * mb, 0)), 6, 10) };
+  if (!skinModel) skinModel = nm; else for (const k in nm) skinModel[k] = skinModel[k] * .8 + nm[k] * .2;
+}
+function renderHenna(x0, y0, w, h, scale) {
+  const M = mctx.getImageData(x0, y0, w, h).data, Bi = fctx.getImageData(x0, y0, w, h), B = Bi.data, n = w * h;
+  const a = buf('a', n), lum = buf('lum', n), lb = buf('lb', n), sm = skinModel, clip = F_CLIP && sm;
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    lum[i] = .299 * B[j] + .587 * B[j + 1] + .114 * B[j + 2];
+    let A = M[j + 3] / 255;
+    if (A > 0 && clip) {
+      const cr = toCr(B[j], B[j + 1], B[j + 2]), cb = toCb(B[j], B[j + 1], B[j + 2]);
+      const q = ((cr - sm.cr) / sm.sr) ** 2 + ((cb - sm.cb) / sm.sb) ** 2;
+      A *= q < 7 ? 1 : q > 16 ? 0 : (16 - q) / 9;
+      if (lum[i] < 22) A = 0;
+    }
+    a[i] = A;
+  }
+  boxBlur(lum, lb, w, h, Math.max(2, Math.round(scale * .03)));
+  const col = COLORS[color].rgb, paste = color === 'paste', dens = F_INT;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x, j = i * 4, A = a[i];
+    if (A < .01) continue;
+    const detail = lum[i] - lb[i];
+    if (paste) {
+      // raised paste: dark, slightly glossy on the upper-left edges
+      const gx = a[i + 1] - a[i - 1], gy = a[i + w] - a[i - w], rim = (-(gx + gy)) * 70;
+      const shade = .7 + .45 * (lb[i] / 255);
+      for (let c = 0; c < 3; c++) {
+        const o = B[j + c] * (1 - A * .94 * dens) + col[c] * shade * A * .94 * dens + rim * A + (detail > 0 ? detail * .6 * A : 0);
+        B[j + c] = o < 0 ? 0 : o > 255 ? 255 : o;
+      }
+    } else {
+      // stain: dye inside the skin, so the skin's own light and texture stay
+      const hl = detail > 0 ? detail * .7 * A : 0;
+      for (let c = 0; c < 3; c++) {
+        const t = col[c] / 255;
+        const o = B[j + c] * (1 - A * dens * (1 - t)) + hl;
+        B[j + c] = o < 0 ? 0 : o > 255 ? 255 : o;
+      }
+    }
+  }
+  octx.putImageData(Bi, x0, y0);
+}
+
+/* =====================================================================
+   4. Camera, hand tracking, frame loop
+   ===================================================================== */
+const vid = $('#vid'), out = $('#out'), octx = out.getContext('2d');
+const frameC = document.createElement('canvas'), fctx = frameC.getContext('2d', { willReadFrequently: true });
+const maskC = document.createElement('canvas'); mctx = maskC.getContext('2d', { willReadFrequently: true });
+let W = 0, H = 0, stream = null, facing = 'user', mirror = true, paused = false, compare = false;
+let det = null, detState = 'idle', lastTs = 0, lastVT = -1, raw = null, smooth = null, lastSeen = 0, debugHand = null;
+let photoMode = false, dirty = false, F_ARM = true, F_CLIP = true, F_INT = .88, F_STEADY = .55;
+
+async function loadDet() {
+  if (detState !== 'idle') return; detState = 'loading'; status();
+  try {
+    const v = await import(TV + '/vision_bundle.mjs');
+    const files = await v.FilesetResolver.forVisionTasks(TV + '/wasm');
+    const make = d => v.HandLandmarker.createFromOptions(files, { baseOptions: { modelAssetPath: HAND_MODEL, delegate: d }, runningMode: 'VIDEO', numHands: 1, minHandDetectionConfidence: .5, minHandPresenceConfidence: .5, minTrackingConfidence: .5 });
+    try { det = await make('GPU'); } catch (e) { det = await make('CPU'); }
+    detState = 'ready';
+  } catch (e) { console.warn('hand tracker failed', e); detState = 'failed'; }
+  status();
+}
+function detect() {
+  if (debugHand) { raw = debugHand.map(p => ({ x: p.x * W, y: p.y * H })); return; }
+  if (!det) { raw = null; return; }
+  let ts = performance.now(); if (ts <= lastTs) ts = lastTs + 1; lastTs = ts;
+  try { const r = det.detectForVideo(frameC, ts); raw = r && r.landmarks && r.landmarks[0] ? r.landmarks[0].map(p => ({ x: p.x * W, y: p.y * H })) : null; }
+  catch (e) { raw = null; }
+}
+function steady(now) {
+  if (raw) {
+    lastSeen = now;
+    if (!smooth || photoMode) smooth = raw.map(p => ({ ...p }));
+    else {
+      const pw = len(sub(raw[5], raw[17])) || 50;
+      smooth = smooth.map((s, i) => {
+        const d = len(sub(raw[i], s)), k = clamp((1 - F_STEADY * .9) + d / (pw * .6), .1, 1);
+        return { x: s.x + (raw[i].x - s.x) * k, y: s.y + (raw[i].y - s.y) * k };
+      });
+    }
+  } else if (smooth && now - lastSeen > 350) smooth = null;
+}
+function resizeTo(w, h) { W = w; H = h; out.width = frameC.width = maskC.width = W; out.height = frameC.height = maskC.height = H; smooth = null; }
+function render() {
+  octx.globalCompositeOperation = 'source-over'; octx.drawImage(frameC, 0, 0);
+  if (!smooth || compare) return;
+  mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.clearRect(0, 0, W, H);
+  drawMehndi(smooth);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const pw = len(sub(smooth[5], smooth[17]));
+  smooth.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+  const m = pw * (F_ARM ? 2.6 : 1); x0 = Math.max(0, Math.floor(x0 - m)); y0 = Math.max(0, Math.floor(y0 - m)); x1 = Math.min(W, Math.ceil(x1 + m)); y1 = Math.min(H, Math.ceil(y1 + m));
+  if (x1 - x0 > 4 && y1 - y0 > 4) renderHenna(x0, y0, x1 - x0, y1 - y0, pw);
+}
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (photoMode) { if (dirty) { dirty = false; render(); } return; }
+  if (!vid.videoWidth) return;
+  if (vid.videoWidth !== W || vid.videoHeight !== H) resizeTo(vid.videoWidth, vid.videoHeight);
+  if (!paused && vid.currentTime !== lastVT) {
+    lastVT = vid.currentTime;
+    fctx.save(); if (mirror) { fctx.translate(W, 0); fctx.scale(-1, 1); } fctx.drawImage(vid, 0, 0, W, H); fctx.restore();
+    detect();
+    if (raw) learnSkin(raw);
+  }
+  steady(now);
+  render();
+  status();
+}
+function status() {
+  const pill = $('#pill'), t = $('#pillText');
+  let m, ok = false;
+  if (detState === 'loading') m = 'Loading hand tracker…';
+  else if (detState === 'failed' && !debugHand) m = 'Hand tracker could not load. Check internet.';
+  else if (photoMode) { ok = !!smooth; m = smooth ? 'Hand found' : 'No hand found in this photo. Try a clearer one.'; }
+  else if (!stream) m = 'Camera off';
+  else if (paused) { ok = true; m = 'Frozen'; }
+  else if (smooth) { ok = true; m = 'Hand found'; }
+  else m = 'Show one open hand';
+  if (t.textContent !== m) t.textContent = m;
+  pill.dataset.s = ok ? 'ok' : 'wait';
+}
+async function startCam() {
+  const msg = $('#introMsg');
+  if (!/^https?:$/.test(location.protocol) || !window.isSecureContext) { msg.textContent = 'Open this page from its https link so the camera can work.'; return false; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { msg.textContent = 'This browser cannot use the camera. Try Chrome or Safari.'; return false; }
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } } }); }
+  catch (e) { msg.textContent = e && e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow the camera for this site, then try again.' : 'No camera could be opened.'; stream = null; return false; }
+  vid.srcObject = stream; try { await vid.play(); } catch (e) {}
+  const s = stream.getVideoTracks()[0].getSettings ? stream.getVideoTracks()[0].getSettings() : {};
+  mirror = s.facingMode ? s.facingMode === 'user' : facing === 'user';
+  smooth = null; skinModel = null; return true;
+}
+async function setPhoto(img) {
+  photoMode = true;
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height, k = Math.min(1, 1600 / Math.max(iw, ih));
+  resizeTo(Math.round(iw * k), Math.round(ih * k));
+  fctx.setTransform(1, 0, 0, 1, 0, 0); fctx.drawImage(img, 0, 0, W, H);
+  out.style.objectFit = 'contain';
+  $('#btnPhoto').textContent = 'Camera'; $('#btnFlip').hidden = true; $('#btnPause').hidden = true;
+  await loadDet();
+  skinModel = null; detect(); if (raw) learnSkin(raw); steady(performance.now());
+  dirty = true; status();
+}
+
+/* =====================================================================
+   5. Controls
+   ===================================================================== */
+function preview(st) {
+  const t = document.createElement('canvas'); t.width = t.height = 128; const tx = t.getContext('2d');
+  tx.drawImage(st.palm, 6, 6, 116, 116);
+  tx.globalCompositeOperation = 'source-in'; tx.fillStyle = '#7a2a12'; tx.fillRect(0, 0, 128, 128);
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+  x.fillStyle = '#fbf6f1'; x.fillRect(0, 0, 128, 128); x.drawImage(t, 0, 0);
+  return c;
+}
+function renderStyles() {
+  const box = $('#styles'); box.textContent = '';
+  Object.entries(STYLES).forEach(([k, st]) => {
+    const b = el('button', 'chip'); b.type = 'button'; b.setAttribute('aria-pressed', k === style);
+    const art = el('div', 'art'); art.appendChild(preview(st)); b.appendChild(art); b.appendChild(el('span', null, st.label));
+    b.addEventListener('click', () => { style = k; renderStyles(); dirty = true; });
+    box.appendChild(b);
+  });
+}
+function renderColors() {
+  const box = $('#colors'); box.textContent = '';
+  Object.entries(COLORS).forEach(([k, c]) => {
+    const b = el('button', 'cc'); b.type = 'button'; b.setAttribute('aria-pressed', k === color);
+    const i = el('i'); i.style.background = c.sw; b.appendChild(i); b.appendChild(document.createTextNode(c.label));
+    b.addEventListener('click', () => { color = k; renderColors(); dirty = true; });
+    box.appendChild(b);
+  });
+}
+function syncAdj() { $('#intenO').textContent = Math.round(F_INT * 100) + '%'; $('#steadyO').textContent = Math.round(F_STEADY * 100) + '%'; }
+$('#inten').addEventListener('input', e => { F_INT = e.target.value / 100; syncAdj(); dirty = true; });
+$('#steady').addEventListener('input', e => { F_STEADY = e.target.value / 100; syncAdj(); });
+$('#fArm').addEventListener('change', e => { F_ARM = e.target.checked; dirty = true; });
+$('#fClip').addEventListener('change', e => { F_CLIP = e.target.checked; dirty = true; });
+$('#btnAdjust').addEventListener('click', e => { const open = $('#adjust').hidden; $('#adjust').hidden = !open; e.currentTarget.setAttribute('aria-expanded', open); e.currentTarget.textContent = open ? 'Done' : 'Adjust'; });
+$('#btnStart').addEventListener('click', async () => { const ok = await startCam(); if (ok) { $('#intro').hidden = true; loadDet(); } });
+$('#btnIntroPhoto').addEventListener('click', () => $('#photoIn').click());
+$('#btnPhoto').addEventListener('click', async () => {
+  if (photoMode) { photoMode = false; out.style.objectFit = ''; $('#btnPhoto').textContent = 'Photo'; $('#btnFlip').hidden = false; $('#btnPause').hidden = false; W = 0; smooth = null; if (!(await startCam())) $('#intro').hidden = false; }
+  else $('#photoIn').click();
+});
+$('#photoIn').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const url = URL.createObjectURL(f);
+  try { const img = new Image(); img.src = url; await img.decode(); $('#intro').hidden = true; await setPhoto(img); }
+  catch (err) { $('#introMsg').textContent = 'That photo could not be opened.'; }
+  finally { URL.revokeObjectURL(url); }
+});
+$('#btnFlip').addEventListener('click', async () => { facing = facing === 'user' ? 'environment' : 'user'; await startCam(); });
+$('#btnPause').addEventListener('click', e => { paused = !paused; e.currentTarget.setAttribute('aria-pressed', paused); e.currentTarget.textContent = paused ? 'Live' : 'Freeze'; });
+const cmp = $('#btnCompare');
+const setCmp = v => { compare = v; dirty = true; };
+cmp.addEventListener('pointerdown', e => { e.preventDefault(); setCmp(true); });
+['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => cmp.addEventListener(ev, () => setCmp(false)));
+cmp.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setCmp(true); } });
+cmp.addEventListener('keyup', () => setCmp(false));
+cmp.addEventListener('contextmenu', e => e.preventDefault());
+let shotUrl = null, shotBlob = null;
+$('#btnShot').addEventListener('click', () => {
+  if (!W) return; compare = false; render();
+  out.toBlob(b => {
+    if (!b) return; shotBlob = b; if (shotUrl) URL.revokeObjectURL(shotUrl); shotUrl = URL.createObjectURL(b);
+    $('#shotImg').src = shotUrl; $('#shotSave').href = shotUrl;
+    const f = new File([b], 'mehndi-preview.png', { type: 'image/png' });
+    $('#shotShare').hidden = !(navigator.canShare && navigator.canShare({ files: [f] }));
+    $('#shotView').hidden = false;
+  }, 'image/png');
+});
+$('#shotShare').addEventListener('click', async () => { try { await navigator.share({ files: [new File([shotBlob], 'mehndi-preview.png', { type: 'image/png' })], title: 'My mehndi preview' }); } catch (e) {} });
+$('#shotClose').addEventListener('click', () => { $('#shotView').hidden = true; });
+
+// intro artwork: the bridal palm in deep stain
+(() => {
+  const h = $('#hero'), x = h.getContext('2d');
+  x.drawImage(STYLES.bridal.palm, 44, 44, 512, 512);
+  x.globalCompositeOperation = 'source-in'; x.fillStyle = '#d9772f'; x.fillRect(0, 0, 600, 600);
+})();
+
+if (/[?&]debug\b/.test(location.search)) window.mehndiDebug = { setHand: pts => { debugHand = pts; detState = 'ready'; if (photoMode) { detect(); learnSkin(raw); steady(performance.now()); dirty = true; } }, state: () => ({ W, H, smooth: !!smooth, skinModel }) };
+
+renderStyles(); renderColors(); syncAdj(); status();
+requestAnimationFrame(loop);
+loadDet();
+</script>
+</body>
+</html>
