@@ -1,0 +1,984 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e0f13">
+<title>Inkfit Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Pirata+One&display=swap">
+<style>
+/* Layout: full-bleed camera stage, slim top bar for status, compact bottom sheet for spot, designs and fit. Single dark look (camera UI). */
+:root{
+  --bg:#0e0f13; --panel:rgba(18,19,25,.84); --solid:#16171d; --ink:#eef0f4; --muted:#9ea5b2;
+  --line:rgba(255,255,255,.13); --accent:#a695ff; --accent-fg:#16112e; --good:#7ddc9a; --warn:#ffd27a; --paper:#f4f5f7;
+  --font-display:'Pirata One',Georgia,serif;
+  --font-body:'Archivo',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 var(--font-body);overflow:hidden;-webkit-tap-highlight-color:transparent}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#stage{position:fixed;inset:0;background:#000}
+#out{display:block;width:100%;height:100%;object-fit:cover;touch-action:none}
+#vid{position:absolute;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
+
+.top{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;gap:8px;
+  padding:calc(8px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 16px max(12px,env(safe-area-inset-left,0px));
+  background:linear-gradient(rgba(0,0,0,.6),rgba(0,0,0,0))}
+.mark{font:400 24px/1 var(--font-display);letter-spacing:.01em}
+.pill{display:inline-flex;align-items:center;gap:7px;min-width:0;font:500 12px/1.2 var(--font-mono);background:rgba(0,0,0,.55);border:1px solid var(--line);padding:6px 10px;border-radius:99px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill span:last-child{overflow:hidden;text-overflow:ellipsis}
+.dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.pill[data-s="ok"] .dot{background:var(--good)}
+.pill[data-s="wait"] .dot{background:var(--warn)}
+.sp{flex:1}
+.ib{flex:none;min-width:40px;height:38px;border-radius:99px;border:1px solid var(--line);background:rgba(0,0,0,.5);display:grid;place-items:center;cursor:pointer;padding:0 12px;font-weight:600;font-size:12px}
+.ib[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--panel);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line);
+  padding:8px max(12px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));max-height:60vh;overflow-y:auto}
+.inner{max-width:780px;margin:0 auto;display:grid;gap:8px}
+.lbl{font:500 10.5px var(--font-mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.scroll{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px}
+.scroll::-webkit-scrollbar{display:none}
+.spot{flex:none;font-weight:600;font-size:12.5px;padding:7px 13px;border-radius:99px;border:1px solid var(--line);background:transparent;cursor:pointer}
+.spot[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.spot:disabled{opacity:.4;cursor:default}
+.hint{margin:0;font-size:12px;color:var(--muted)}
+.tile{flex:none;position:relative;width:56px;background:none;border:0;padding:0;cursor:pointer}
+.art{width:56px;height:56px;border-radius:7px;background:var(--paper);display:grid;place-items:center;overflow:hidden;border:1px solid var(--line)}
+.art img{width:86%;height:86%;object-fit:contain}
+.tile[aria-pressed="true"] .art{outline:2px solid var(--accent);outline-offset:2px}
+.add .art{background:transparent;border:1.5px dashed var(--line);color:var(--ink);font-size:24px;font-weight:300}
+.x{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:1px solid var(--line);background:var(--solid);font-size:13px;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{min-height:40px;padding:8px 14px;border-radius:9px;border:1px solid var(--line);background:var(--solid);font-weight:600;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:default}
+.adj{margin-left:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px 22px;padding-top:8px;border-top:1px solid var(--line)}
+.ctl{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:2px 8px}
+.ctl output{font:500 12px var(--font-mono);font-variant-numeric:tabular-nums}
+.ctl input[type=range]{grid-column:1/-1;width:100%;margin:0;min-height:28px;accent-color:var(--accent)}
+.sws{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+.sw{width:30px;height:30px;border-radius:50%;border:2px solid var(--solid);box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0}
+.sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--accent)}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px}
+.chk input{width:18px;height:18px;accent-color:var(--accent)}
+
+.overlay{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(8,9,12,.92);
+  padding:calc(20px + env(safe-area-inset-top,0px)) max(18px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px));overflow-y:auto}
+#intro{background:var(--bg)}
+.card{width:100%;max-width:440px;display:grid;gap:16px}
+.card h1{font:400 54px/.95 var(--font-display);margin:0;letter-spacing:.01em}
+.card p{margin:0;color:var(--muted);line-height:1.5}
+.card ol{margin:0;padding-left:20px;color:var(--muted);display:grid;gap:6px;line-height:1.45}
+.msg{min-height:1.4em;color:var(--warn)!important;font-size:13px}
+.shot{max-width:min(92vw,720px)}
+.shot img{width:100%;max-height:68vh;object-fit:contain;border-radius:8px;background:#000}
+a.btn{text-decoration:none;display:inline-grid;place-items:center}
+@media (min-width:900px){.sheet{left:auto;right:16px;bottom:16px;width:400px;border:1px solid var(--line);border-radius:14px;max-height:calc(100vh - 100px)}#out{object-fit:contain}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="vid" playsinline muted autoplay></video>
+  <canvas id="out" aria-label="Live camera view with tattoo preview"></canvas>
+</div>
+
+<header class="top">
+  <span class="mark">Inkfit</span>
+  <span class="pill" id="pill" data-s="wait"><span class="dot"></span><span id="pillText">Starting…</span></span>
+  <span class="sp"></span>
+  <button class="ib" id="btnFlipCam" type="button" aria-label="Switch camera">Switch</button>
+  <button class="ib" id="btnPause" type="button" aria-pressed="false">Freeze</button>
+</header>
+
+<section class="sheet" aria-label="Tattoo controls">
+  <div class="inner">
+    <div class="scroll" id="spots" role="group" aria-label="Where on the body"></div>
+    <p class="hint" id="spotHint"></p>
+    <div class="scroll" id="strip" aria-label="Designs"></div>
+    <div class="bar">
+      <button class="btn primary" id="btnShot" type="button">Take picture</button>
+      <button class="btn" id="btnCompare" type="button">Hold: no tattoo</button>
+      <button class="btn adj" id="btnAdjust" type="button" aria-expanded="false" aria-controls="adjust">Adjust</button>
+    </div>
+    <div class="grid" id="adjust" hidden>
+      <div class="ctl"><label class="lbl" for="sz">Size</label><output id="szo"></output><input id="sz" type="range" min="10" max="160" step="1"></div>
+      <div class="ctl"><label class="lbl" for="pos">Position along arm</label><output id="poso"></output><input id="pos" type="range" min="5" max="95" step="1"></div>
+      <div class="ctl"><label class="lbl" for="rot">Rotation</label><output id="roto"></output><input id="rot" type="range" min="-180" max="180" step="1"></div>
+      <div class="ctl"><label class="lbl" for="curve">Wrap around arm</label><output id="curveo"></output><input id="curve" type="range" min="0" max="100" step="1"></div>
+      <div class="ctl"><label class="lbl" for="op">Ink strength</label><output id="opo"></output><input id="op" type="range" min="20" max="100" step="1"></div>
+      <div class="ctl"><label class="lbl" for="tex">Skin shine over ink</label><output id="texo"></output><input id="tex" type="range" min="0" max="60" step="1"></div>
+      <div class="ctl"><label class="lbl" for="smooth">Steadiness</label><output id="smootho"></output><input id="smooth" type="range" min="0" max="90" step="1"></div>
+      <div style="display:grid;gap:8px">
+        <span class="lbl">Look</span>
+        <div class="bar" role="group" aria-label="Tattoo look">
+          <button class="btn look" type="button" data-look="healed" aria-pressed="true">Healed</button>
+          <button class="btn look" type="button" data-look="fresh" aria-pressed="false">Fresh</button>
+        </div>
+        <span class="lbl">Ink</span>
+        <div class="sws" id="sws"></div>
+        <label class="chk"><input type="checkbox" id="colorMode"> Keep design colors</label>
+        <label class="chk"><input type="checkbox" id="clip" checked> Keep ink on skin only</label>
+        <button class="btn" id="btnMirror" type="button" style="justify-self:start">Mirror design</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="overlay" id="intro">
+  <div class="card">
+    <h1>Inkfit Live</h1>
+    <p>See a design on your own skin through the camera. It follows your arm as you move.</p>
+    <ol>
+      <li>Use good light and roll up your sleeve.</li>
+      <li>Point the back camera at your forearm, with your hand in view.</li>
+      <li>Keep your fingers open so the hand is easy to find.</li>
+    </ol>
+    <button class="btn primary" id="btnStart" type="button">Start camera</button>
+    <p class="msg" id="introMsg" role="status"></p>
+    <p style="font-size:12px">The video stays on your device. Nothing is recorded or uploaded.</p>
+  </div>
+</div>
+
+<div class="overlay" id="shotView" hidden>
+  <div class="card shot">
+    <img id="shotImg" alt="Your tattoo preview">
+    <div class="bar">
+      <a class="btn primary" id="shotSave" download="inkfit-preview.png" href="#">Save</a>
+      <button class="btn" id="shotShare" type="button" hidden>Share</button>
+      <button class="btn" id="shotClose" type="button">Back to camera</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileIn" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+
+<script type="module">
+/* ===== Artist designs =====
+   Put your design images in a "designs" folder next to this file and list them here.
+   Black linework on a white or transparent background works best. */
+const ARTIST_DESIGNS = [
+  // { name: 'Rose', src: 'designs/rose.png' },
+];
+
+const TV = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const MODELS = {
+  hand: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+  pose: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+};
+
+const $ = s => document.querySelector(s);
+const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const L = 512;
+
+/* ---------- state ---------- */
+const F = { size: .4, pos: .45, rot: 0, curve: .45, op: .9, tex: .25, smooth: .6, flip: false, clip: true, color: '#14161b', mode: 'ink', look: 'healed', disp: 1 };
+const SPOTS = {
+  fore:   { label: 'Forearm',         kind: 'fore',  need: 'hand', hint: 'Point the back camera at your forearm with your hand in view. Drag the design to move it.', d: { size: .4, pos: .45, curve: .45 } },
+  lupper: { label: 'Left upper arm',  kind: 'limb',  need: 'pose', a: 11, b: 13, hint: 'Use the front camera and step back so your head and shoulders are in view.', d: { size: .45, pos: .55, curve: .4 } },
+  rupper: { label: 'Right upper arm', kind: 'limb',  need: 'pose', a: 12, b: 14, hint: 'Use the front camera and step back so your head and shoulders are in view.', d: { size: .45, pos: .55, curve: .4 } },
+  chest:  { label: 'Chest',           kind: 'chest', need: 'pose', hint: 'Use the front camera and step back so your head and chest are in view.', d: { size: .45, pos: .45, curve: .1 } },
+  free:   { label: 'Stick anywhere',  kind: 'free',  hint: 'Drag the design onto your skin and let go. It sticks to that spot and moves with you.', d: { size: .3, pos: .5, curve: .2 } },
+};
+let spot = 'fore';
+const manual = { x: .5, y: .5 };
+
+let vision = null, files = null;
+const det = { hand: null, pose: null }, detState = { hand: 'idle', pose: 'idle' };
+let stream = null, facing = 'environment', mirror = false;
+let W = 0, H = 0, paused = false, compare = false;
+let hand = null, poseLm = null, lastVT = -1, lastTs = 0, cur = null, lastGood = 0, trackInfo = '';
+let debugHand = null;
+
+const vid = $('#vid'), out = $('#out'), octx = out.getContext('2d');
+const frameC = document.createElement('canvas'), fctx = frameC.getContext('2d', { willReadFrequently: true });
+const tmp = document.createElement('canvas'), tctx = tmp.getContext('2d', { willReadFrequently: true });
+const anaC = document.createElement('canvas'), actx = anaC.getContext('2d', { willReadFrequently: true });
+const skinC = document.createElement('canvas'), sctx = skinC.getContext('2d');
+let skin = null, skinImg = null, skinModel = null, skinReady = false, prevAxis = null, lastH = 0;
+let gray = null;
+/* skin-lock: follows the texture of the skin under the tattoo */
+const TR = 18, TS = 16, OFFS = [];
+for (let y = -TR; y <= TR; y += 2) for (let x = -TR; x <= TR; x += 2) OFFS.push([x, y]);
+let anchor = null, tpl = null, tplFrames = 0, vel = { x: 0, y: 0 }, pinned = false, goal = null;
+let armAng = null, armW = 0, axisRef = null, widthRef = 0, dragging = false;
+const rawC = document.createElement('canvas'), layerC = document.createElement('canvas');
+rawC.width = rawC.height = layerC.width = layerC.height = L;
+const rawX = rawC.getContext('2d'), layX = layerC.getContext('2d');
+let srcData = null, procData = null, layerReady = false, design = null, selTok = 0;
+
+/* ---------- trackers (MediaPipe) ---------- */
+async function loadDet(kind) {
+  if (detState[kind] === 'ready' || detState[kind] === 'loading') return;
+  detState[kind] = 'loading'; status();
+  try {
+    if (!vision) {
+      vision = await import(TV + '/vision_bundle.mjs');
+      files = await vision.FilesetResolver.forVisionTasks(TV + '/wasm');
+    }
+    const make = d => kind === 'hand'
+      ? vision.HandLandmarker.createFromOptions(files, { baseOptions: { modelAssetPath: MODELS.hand, delegate: d }, runningMode: 'VIDEO', numHands: 1, minHandDetectionConfidence: .5, minHandPresenceConfidence: .5, minTrackingConfidence: .5 })
+      : vision.PoseLandmarker.createFromOptions(files, { baseOptions: { modelAssetPath: MODELS.pose, delegate: d }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: .5, minPosePresenceConfidence: .5, minTrackingConfidence: .5 });
+    try { det[kind] = await make('GPU'); } catch (e) { det[kind] = await make('CPU'); }
+    detState[kind] = 'ready';
+  } catch (e) {
+    console.warn('Tracker failed to load', kind, e);
+    detState[kind] = 'failed';
+  }
+  status();
+}
+function runDetect() {
+  const need = SPOTS[spot].need;
+  hand = null; poseLm = null;
+  let ts = performance.now(); if (ts <= lastTs) ts = lastTs + 1; lastTs = ts;
+  if (need === 'hand') {
+    if (debugHand) { hand = debugHand.map(p => ({ x: p.x * W, y: p.y * H })); return; }
+    if (!det.hand) return;
+    try {
+      const r = det.hand.detectForVideo(frameC, ts);
+      if (r && r.landmarks && r.landmarks[0]) hand = r.landmarks[0].map(p => ({ x: p.x * W, y: p.y * H }));
+    } catch (e) {}
+  } else if (need === 'pose' && det.pose) {
+    try {
+      const r = det.pose.detectForVideo(frameC, ts);
+      if (r && r.landmarks && r.landmarks[0]) poseLm = r.landmarks[0].map(p => ({ x: p.x * W, y: p.y * H, v: p.visibility == null ? 1 : p.visibility }));
+    } catch (e) {}
+  }
+}
+
+/* ---------- skin map ---------- */
+// Learns the person's skin colour from the palm (or face), then marks matching pixels.
+function trainingPoints() {
+  const pts = [];
+  if (hand) {
+    const w = hand[0], i = hand[5], m = hand[9], p = hand[17];
+    const c = { x: (w.x + i.x + m.x + p.x) / 4, y: (w.y + i.y + m.y + p.y) / 4 };
+    pts.push(c);
+    [w, i, m, p].forEach(q => pts.push({ x: c.x + (q.x - c.x) * .5, y: c.y + (q.y - c.y) * .5 }));
+  } else if (poseLm) {
+    const n = poseLm[0], l = poseLm[11], r = poseLm[12];
+    if (n.v > .5) {
+      const sw = Math.hypot(r.x - l.x, r.y - l.y) || 60, o = sw * .05;
+      pts.push({ x: n.x, y: n.y + o }, { x: n.x - o, y: n.y + o * 1.5 }, { x: n.x + o, y: n.y + o * 1.5 });
+    }
+  }
+  return pts;
+}
+const toCr = (r, g, b) => 128 + .5 * r - .4187 * g - .0813 * b;
+const toCb = (r, g, b) => 128 - .1687 * r - .3313 * g + .5 * b;
+function analyzeSkin() {
+  const aw = anaC.width, ah = anaC.height, s = aw / W;
+  actx.drawImage(frameC, 0, 0, aw, ah);
+  const d = actx.getImageData(0, 0, aw, ah).data;
+  const pts = trainingPoints();
+  if (pts.length) {
+    let n = 0, sr = 0, sb = 0, srr = 0, sbb = 0;
+    pts.forEach(p => {
+      const cx = Math.round(p.x * s), cy = Math.round(p.y * s);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const x = cx + dx, y = cy + dy; if (x < 0 || y < 0 || x >= aw || y >= ah) continue;
+        const k = (y * aw + x) * 4, cr = toCr(d[k], d[k + 1], d[k + 2]), cb = toCb(d[k], d[k + 1], d[k + 2]);
+        n++; sr += cr; sb += cb; srr += cr * cr; sbb += cb * cb;
+      }
+    });
+    if (n > 8) {
+      const mr = sr / n, mb = sb / n;
+      const vr = Math.max(srr / n - mr * mr, 0), vb = Math.max(sbb / n - mb * mb, 0);
+      const nm = { cr: mr, cb: mb, sr: Math.max(Math.sqrt(vr), 5), sb: Math.max(Math.sqrt(vb), 5) };
+      // ignore samples that are clearly not skin (e.g. a sleeve under the palm point)
+      if (nm.cr > 128 && nm.cb < 135) {
+        if (!skinModel) skinModel = nm;
+        else for (const k in nm) skinModel[k] = skinModel[k] * .85 + nm[k] * .15;
+      }
+    }
+  }
+  if (!skin || skin.length !== aw * ah) { skin = new Float32Array(aw * ah); gray = new Float32Array(aw * ah); skinImg = sctx.createImageData(aw, ah); }
+  const m = skinModel, sd = skinImg.data;
+  for (let i = 0, k = 0; i < skin.length; i++, k += 4) {
+    const r = d[k], g = d[k + 1], b = d[k + 2];
+    const y = .299 * r + .587 * g + .114 * b;
+    gray[i] = y;
+    let p = 0;
+    if (y > 28) {
+      const cr = toCr(r, g, b), cb = toCb(r, g, b);
+      if (m) {
+        const a = (cr - m.cr) / m.sr, c = (cb - m.cb) / m.sb, q = a * a + c * c;
+        p = q < 6 ? 1 : q > 14 ? 0 : (14 - q) / 8;
+      } else p = (cr >= 135 && cr <= 175 && cb >= 80 && cb <= 125) ? 1 : 0;
+    }
+    skin[i] = skin[i] * .35 + p * .65;
+    sd[k + 3] = skin[i] * 255;
+  }
+  skinC.width = aw; skinC.height = ah;
+  sctx.putImageData(skinImg, 0, 0);
+  skinReady = true;
+}
+
+/* ---------- forearm from hand + skin ---------- */
+function forearm() {
+  if (!skinReady) return null;
+  const aw = anaC.width, ah = anaC.height, s = aw / W;
+  let Wp = null, d = null, h = 0;
+  if (hand) {
+    Wp = { x: hand[0].x * s, y: hand[0].y * s };
+    const M = { x: hand[9].x * s, y: hand[9].y * s };
+    const vx = Wp.x - M.x, vy = Wp.y - M.y; h = Math.hypot(vx, vy);
+    if (h < 3) return null;
+    d = { x: vx / h, y: vy / h };
+    lastH = h / s;
+  }
+  // pass 1: centroid of skin pixels on the forearm side of the wrist
+  let n = 0, mx = 0, my = 0;
+  const inReg = (x, y) => {
+    if (!Wp) return true;
+    const rx = x - Wp.x, ry = y - Wp.y, t = rx * d.x + ry * d.y, q = -rx * d.y + ry * d.x;
+    return t > .35 * h && t < 4.2 * h && Math.abs(q) < 1.6 * h;
+  };
+  for (let y = 0; y < ah; y++) for (let x = 0; x < aw; x++) {
+    if (skin[y * aw + x] < .5 || !inReg(x, y)) continue;
+    n++; mx += x; my += y;
+  }
+  const minN = Wp ? .12 * h * h : .02 * aw * ah;
+  if (n < Math.max(minN, 30)) return null;
+  mx /= n; my /= n;
+  // pass 2: covariance -> main direction of the arm
+  let cxx = 0, cyy = 0, cxy = 0;
+  for (let y = 0; y < ah; y++) for (let x = 0; x < aw; x++) {
+    if (skin[y * aw + x] < .5 || !inReg(x, y)) continue;
+    const dx = x - mx, dy = y - my; cxx += dx * dx; cyy += dy * dy; cxy += dx * dy;
+  }
+  const ang = .5 * Math.atan2(2 * cxy, cxx - cyy);
+  let a = { x: Math.cos(ang), y: Math.sin(ang) };
+  if (d) {
+    if (a.x * d.x + a.y * d.y < 0) a = { x: -a.x, y: -a.y };
+    const bx = a.x * .75 + d.x * .25, by = a.y * .75 + d.y * .25, bl = Math.hypot(bx, by) || 1;
+    a = { x: bx / bl, y: by / bl };
+  } else if (prevAxis && a.x * prevAxis.x + a.y * prevAxis.y < 0) a = { x: -a.x, y: -a.y };
+  prevAxis = a;
+  // pass 3: width across the arm and extent along it
+  let sq = 0, tMin = Infinity, tMax = -Infinity;
+  const ox = Wp ? Wp.x : mx, oy = Wp ? Wp.y : my;
+  for (let y = 0; y < ah; y++) for (let x = 0; x < aw; x++) {
+    if (skin[y * aw + x] < .5 || !inReg(x, y)) continue;
+    const q = -(x - mx) * a.y + (y - my) * a.x; sq += q * q;
+    const t = (x - ox) * a.x + (y - oy) * a.y; if (t < tMin) tMin = t; if (t > tMax) tMax = t;
+  }
+  const width = Math.sqrt(sq / n) * 3.46;
+  return {
+    C: { x: mx / s, y: my / s }, a, width: width / s, W: Wp ? { x: Wp.x / s, y: Wp.y / s } : null,
+    h: Wp ? h / s : lastH, tMin: tMin / s, tMax: tMax / s,
+  };
+}
+
+/* ---------- camera ---------- */
+function stopCam() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } }
+async function startCam() {
+  const msg = $('#introMsg');
+  if (!/^https?:$/.test(location.protocol)) { msg.textContent = 'You opened the file directly, so the browser blocks the camera. Put this file on a website and open its https link instead.'; return false; }
+  if (!window.isSecureContext) { msg.textContent = 'The camera only works on a secure link. Open this page through https.'; return false; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { msg.textContent = 'This browser cannot use the camera. Try Chrome or Safari.'; return false; }
+  stopCam();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+  } catch (e) {
+    msg.textContent = e && e.name === 'NotAllowedError'
+      ? 'Camera access was blocked. Allow the camera for this site in your browser settings, then try again.'
+      : 'No camera could be opened. Check that no other app is using it.';
+    return false;
+  }
+  vid.srcObject = stream;
+  try { await vid.play(); } catch (e) {}
+  const tr = stream.getVideoTracks()[0], st = tr.getSettings ? tr.getSettings() : {};
+  mirror = st.facingMode ? st.facingMode === 'user' : facing === 'user';
+  cur = null; hand = null; poseLm = null; skinModel = null; prevAxis = null; resetLock();
+  return true;
+}
+$('#btnStart').addEventListener('click', async () => {
+  const b = $('#btnStart'); b.disabled = true; $('#introMsg').textContent = '';
+  const ok = await startCam();
+  b.disabled = false;
+  if (ok) $('#intro').hidden = true;
+});
+$('#btnFlipCam').addEventListener('click', async () => { facing = facing === 'user' ? 'environment' : 'user'; await startCam(); });
+$('#btnPause').addEventListener('click', e => { paused = !paused; e.currentTarget.setAttribute('aria-pressed', paused); e.currentTarget.textContent = paused ? 'Live' : 'Freeze'; });
+
+/* ---------- frame loop ---------- */
+function resize() {
+  W = vid.videoWidth; H = vid.videoHeight;
+  out.width = frameC.width = tmp.width = W;
+  out.height = frameC.height = tmp.height = H;
+  anaC.width = 240; anaC.height = Math.max(1, Math.round(240 * H / W));
+  cur = null; skin = null; skinReady = false; resetLock();
+}
+function resetLock() { anchor = null; tpl = null; vel = { x: 0, y: 0 }; pinned = false; goal = null; axisRef = null; widthRef = 0; }
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (!vid.videoWidth) return;
+  if (vid.videoWidth !== W || vid.videoHeight !== H) resize();
+  if (!paused && vid.currentTime !== lastVT) {
+    lastVT = vid.currentTime;
+    fctx.save();
+    if (mirror) { fctx.translate(W, 0); fctx.scale(-1, 1); }
+    fctx.drawImage(vid, 0, 0, W, H);
+    fctx.restore();
+    runDetect();
+    analyzeSkin();
+    updateTracking();
+  }
+  track(now);
+  compose();
+}
+
+/* ---------- placement ---------- */
+function target() {
+  const sp = SPOTS[spot], rot = F.rot * Math.PI / 180;
+  trackInfo = '';
+  if (sp.kind === 'free') return null;
+  if (sp.kind === 'fore') {
+    const f = lastFa; if (!f) return null;
+    let c;
+    if (f.W) {
+      const len = Math.max(Math.min(f.tMax, 2.8 * f.h), .8 * f.h);
+      const t = len * F.pos;
+      const px = f.W.x + f.a.x * t, py = f.W.y + f.a.y * t;
+      const k = (px - f.C.x) * f.a.x + (py - f.C.y) * f.a.y;
+      c = { x: f.C.x + f.a.x * k, y: f.C.y + f.a.y * k };
+      trackInfo = 'hand';
+    } else {
+      const k = (F.pos - .5) * (f.tMax - f.tMin) * .6;
+      c = { x: f.C.x + f.a.x * k, y: f.C.y + f.a.y * k };
+      trackInfo = 'skin';
+    }
+    let base = f.width;
+    if (f.h) base = clamp(base, .5 * f.h, 2.2 * f.h);
+    return { x: c.x, y: c.y, ang: Math.atan2(-f.a.x, f.a.y) + rot, size: base * F.size * 2 };
+  }
+  if (!poseLm) return null;
+  if (sp.kind === 'limb') {
+    const A = poseLm[sp.a], B = poseLm[sp.b];
+    if (Math.min(A.v, B.v) < .5) return null;
+    const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy);
+    if (len < 24) return null;
+    return { x: A.x + dx * F.pos, y: A.y + dy * F.pos, ang: Math.atan2(A.x - B.x, B.y - A.y) + rot, size: len * F.size };
+  }
+  const l = poseLm[11], r = poseLm[12];
+  if (Math.min(l.v, r.v) < .5) return null;
+  const S = { x: (l.x + r.x) / 2, y: (l.y + r.y) / 2 }, sw = Math.hypot(r.x - l.x, r.y - l.y);
+  if (sw < 30) return null;
+  let Hp;
+  const hl = poseLm[23], hr = poseLm[24];
+  if (Math.min(hl.v, hr.v) > .5) Hp = { x: (hl.x + hr.x) / 2, y: (hl.y + hr.y) / 2 };
+  else {
+    let nx = -(r.y - l.y), ny = r.x - l.x; if (ny < 0) { nx = -nx; ny = -ny; }
+    const n = Math.hypot(nx, ny) || 1; Hp = { x: S.x + nx / n * sw * 1.5, y: S.y + ny / n * sw * 1.5 };
+  }
+  return { x: S.x + (Hp.x - S.x) * F.pos * .6, y: S.y + (Hp.y - S.y) * F.pos * .6, ang: Math.atan2(S.x - Hp.x, Hp.y - S.y) + rot, size: sw * F.size * 1.4 };
+}
+/* skin-lock template tracking on the grey analysis image */
+function grabTemplate(p) {
+  const aw = anaC.width, ah = anaC.height, s = aw / W;
+  const cx = Math.round(p.x * s), cy = Math.round(p.y * s);
+  if (!gray || cx < TR || cy < TR || cx >= aw - TR || cy >= ah - TR) { tpl = null; return; }
+  const v = new Float32Array(OFFS.length); let sm = 0, sq = 0;
+  for (let k = 0; k < OFFS.length; k++) { const g = gray[(cy + OFFS[k][1]) * aw + cx + OFFS[k][0]]; v[k] = g; sm += g; sq += g * g; }
+  const m = sm / OFFS.length, sd = Math.sqrt(Math.max(sq / OFFS.length - m * m, 0));
+  tpl = sd < 2.5 ? null : { v, m, sd };
+  tplFrames = 0;
+}
+function zncc(cx, cy) {
+  const aw = anaC.width, n = OFFS.length, t = tpl.v; let sI = 0, sII = 0, sIT = 0;
+  for (let k = 0; k < n; k++) { const g = gray[(cy + OFFS[k][1]) * aw + cx + OFFS[k][0]]; sI += g; sII += g * g; sIT += g * t[k]; }
+  const mI = sI / n, vI = sII / n - mI * mI;
+  if (vI < 1) return -1;
+  return (sIT / n - mI * tpl.m) / (Math.sqrt(vI) * tpl.sd);
+}
+function matchTemplate(px, py) {
+  const aw = anaC.width, ah = anaC.height;
+  let best = { x: Math.round(px), y: Math.round(py), score: -2 };
+  const search = (x0, y0, rad, step) => {
+    let b = { x: x0, y: y0, score: -2 };
+    for (let dy = -rad; dy <= rad; dy += step) for (let dx = -rad; dx <= rad; dx += step) {
+      const cx = x0 + dx, cy = y0 + dy;
+      if (cx < TR || cy < TR || cx >= aw - TR || cy >= ah - TR) continue;
+      const sc = zncc(cx, cy);
+      if (sc > b.score) b = { x: cx, y: cy, score: sc };
+    }
+    return b;
+  };
+  best = search(best.x, best.y, TS, 2);
+  if (best.score > -2) best = search(best.x, best.y, 2, 1);
+  // sub-pixel refinement (parabola through neighbours) to cut jitter
+  const bx = best.x, by = best.y;
+  if (bx > TR && by > TR && bx < aw - TR - 1 && by < ah - TR - 1 && best.score > 0) {
+    const s0 = best.score, l = zncc(bx - 1, by), rr = zncc(bx + 1, by), u = zncc(bx, by - 1), dn = zncc(bx, by + 1);
+    const ddx = l - 2 * s0 + rr, ddy = u - 2 * s0 + dn;
+    if (ddx < 0) best.x = bx + clamp((l - rr) / (2 * ddx), -.5, .5);
+    if (ddy < 0) best.y = by + clamp((u - dn) / (2 * ddy), -.5, .5);
+  }
+  return best;
+}
+let lastFa = null;
+function updateTracking() {
+  const sp = SPOTS[spot], rot = F.rot * Math.PI / 180;
+  if (sp.kind === 'limb' || sp.kind === 'chest') { goal = target(); return; }
+  lastFa = skinReady ? forearm() : null;
+  if (lastFa) { armAng = Math.atan2(lastFa.a.y, lastFa.a.x); armW = lastFa.width; } else armAng = null;
+  const est = sp.kind === 'fore' ? target() : null;
+  const s = anaC.width / W;
+  // follow the skin under the tattoo
+  if (anchor && tpl && !dragging) {
+    const m = matchTemplate((anchor.x + vel.x) * s, (anchor.y + vel.y) * s);
+    if (m.score > .55) {
+      const nx = m.x / s, ny = m.y / s;
+      vel = { x: (nx - anchor.x) * .7, y: (ny - anchor.y) * .7 };
+      anchor = { x: nx, y: ny };
+      tplFrames++;
+      if (tplFrames > 6 || m.score < .8) grabTemplate(anchor);
+    } else {
+      tpl = null; vel = { x: 0, y: 0 };
+      if (sp.kind === 'fore') { anchor = null; pinned = false; }
+    }
+  }
+  if (sp.kind === 'fore') {
+    if (est && !dragging) {
+      if (!anchor) { anchor = { x: est.x, y: est.y }; grabTemplate(anchor); }
+      else {
+        const f = lastFa, dx = anchor.x - f.C.x, dy = anchor.y - f.C.y;
+        const q = -dx * f.a.y + dy * f.a.x;               // distance from the arm's centre line
+        if (Math.abs(q) > f.width * .9) { anchor = { x: est.x, y: est.y }; grabTemplate(anchor); pinned = false; }
+        else if (!pinned) {
+          if (f.W) { anchor.x += (est.x - anchor.x) * .06; anchor.y += (est.y - anchor.y) * .06; }
+          anchor.x -= -f.a.y * q * .12; anchor.y -= f.a.x * q * .12;
+        }
+      }
+      if (anchor && !tpl) grabTemplate(anchor);
+    }
+    if (anchor && est) goal = { x: anchor.x, y: anchor.y, ang: est.ang, size: est.size };
+    else if (anchor && goal) goal = { ...goal, x: anchor.x, y: anchor.y };
+    else goal = est;
+    return;
+  }
+  // stick anywhere
+  if (!anchor) { anchor = { x: manual.x * W, y: manual.y * H }; }
+  if (!tpl && !dragging) grabTemplate(anchor);
+  if (!dragging && (axisRef == null || !widthRef)) { axisRef = armAng; widthRef = armW; }
+  let ang = rot, size = F.size * Math.min(W, H);
+  if (armAng != null && axisRef != null) {
+    let da = armAng - axisRef; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+    if (Math.abs(da) < 1.2) ang += da;
+  }
+  if (armW && widthRef) size *= clamp(armW / widthRef, .6, 1.6);
+  goal = { x: anchor.x, y: anchor.y, ang, size };
+}
+function track(now) {
+  const t = goal;
+  if (t) {
+    lastGood = now;
+    if (!cur) cur = { ...t };
+    else {
+      const ap = dragging ? 1 : 1 - F.smooth * .6, a = 1 - F.smooth * .92;
+      cur.x += (t.x - cur.x) * ap; cur.y += (t.y - cur.y) * ap; cur.size += (t.size - cur.size) * a;
+      let da = t.ang - cur.ang; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+      cur.ang += da * a;
+    }
+  } else if (cur && now - lastGood > 500) cur = null;
+  status();
+}
+function status() {
+  const pill = $('#pill'), txt = $('#pillText'), sp = SPOTS[spot], need = sp.need;
+  let s = 'wait', m;
+  if (!stream) m = 'Camera off';
+  else if (spot === 'free') { s = tpl ? 'ok' : 'wait'; m = dragging ? 'Let go on your skin' : tpl ? 'Stuck to your skin' : 'Drag the design onto your skin'; }
+  else if (paused) { s = 'ok'; m = 'Frozen'; }
+  else if (cur && spot === 'fore' && trackInfo === 'skin') { s = 'ok'; m = 'Tracking arm. Show your hand for a better fit'; }
+  else if (detState[need] === 'loading' || detState[need] === 'idle') m = 'Loading tracker…';
+  else if (detState[need] === 'failed' && !debugHand) m = 'Tracker could not load. Check internet.';
+  else if (cur && spot === 'fore') { s = 'ok'; m = trackInfo === 'skin' ? 'Tracking arm. Show your hand for a better fit' : 'Tracking forearm'; }
+  else if (cur) { s = 'ok'; m = 'Tracking ' + sp.label.toLowerCase(); }
+  else m = spot === 'fore' ? 'Show your forearm and open hand' : 'Show your head and ' + (sp.kind === 'chest' ? 'chest' : 'shoulders');
+  if (txt.textContent !== m) txt.textContent = m;
+  if (pill.dataset.s !== s) pill.dataset.s = s;
+}
+
+/* ---------- compositing: ink rendered under the skin ---------- */
+const LOOKS = {
+  healed: { spread: 1.0, dens: .86, halo: 0,   tint: [.96, 1.0, 1.06] },
+  fresh:  { spread: .45, dens: .97, halo: .55, tint: [1, 1, 1] },
+};
+const BUF = {};
+function buf(name, n) { if (!BUF[name] || BUF[name].length < n) BUF[name] = new Float32Array(n); return BUF[name]; }
+function boxBlur(src, dst, w, h, r) {
+  const t = buf('bb', w * h);
+  for (let y = 0; y < h; y++) {
+    const o = y * w; let s = 0;
+    for (let x = -r; x <= r; x++) s += src[o + clamp(x, 0, w - 1)];
+    for (let x = 0; x < w; x++) {
+      t[o + x] = s / (2 * r + 1);
+      s += src[o + Math.min(x + r + 1, w - 1)] - src[o + Math.max(x - r, 0)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let y = -r; y <= r; y++) s += t[clamp(y, 0, h - 1) * w + x];
+    for (let y = 0; y < h; y++) {
+      dst[y * w + x] = s / (2 * r + 1);
+      s += t[Math.min(y + r + 1, h - 1) * w + x] - t[Math.max(y - r, 0) * w + x];
+    }
+  }
+}
+function compose() {
+  octx.globalCompositeOperation = 'source-over'; octx.globalAlpha = 1;
+  octx.drawImage(frameC, 0, 0);
+  if (!cur || !layerReady || compare) return;
+  const look = LOOKS[F.look] || LOOKS.healed;
+  const k = cur.size / L;
+  // 1. place the design (with ink spread) and keep it on skin
+  tctx.setTransform(1, 0, 0, 1, 0, 0);
+  tctx.globalCompositeOperation = 'source-over'; tctx.globalAlpha = 1;
+  tctx.clearRect(0, 0, W, H);
+  const spread = look.spread * cur.size / 380;
+  if ('filter' in tctx && spread > .3) tctx.filter = 'blur(' + spread.toFixed(2) + 'px)';
+  tctx.translate(cur.x, cur.y); tctx.rotate(cur.ang); tctx.scale(F.flip ? -k : k, k);
+  tctx.drawImage(layerC, -L / 2, -L / 2);
+  tctx.setTransform(1, 0, 0, 1, 0, 0);
+  tctx.filter = 'none';
+  if (F.clip && skinReady) {
+    tctx.globalCompositeOperation = 'destination-in';
+    if ('filter' in tctx) tctx.filter = 'blur(' + Math.max(1, W / 400).toFixed(1) + 'px)';
+    tctx.drawImage(skinC, 0, 0, W, H);
+    tctx.filter = 'none';
+    tctx.globalCompositeOperation = 'source-over';
+  }
+  // 2. work only inside the tattoo's box
+  const r = cur.size * .74 + 4;
+  const x0 = Math.max(0, Math.floor(cur.x - r)), y0 = Math.max(0, Math.floor(cur.y - r));
+  const x1 = Math.min(W, Math.ceil(cur.x + r)), y1 = Math.min(H, Math.ceil(cur.y + r));
+  const w = x1 - x0, h = y1 - y0;
+  if (w < 4 || h < 4) return;
+  const Ti = tctx.getImageData(x0, y0, w, h), T = Ti.data;
+  const Bi = fctx.getImageData(x0, y0, w, h), B = Bi.data;
+  const n = w * h;
+  const lum = buf('lum', n), lb = buf('lb', n), a = buf('a', n), ab = buf('ab', n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) { lum[i] = .299 * B[j] + .587 * B[j + 1] + .114 * B[j + 2]; a[i] = T[j + 3] / 255; }
+  // skin shading (low frequency) and skin detail (pores, hair, shine = high frequency)
+  boxBlur(lum, lb, w, h, Math.max(2, Math.round(cur.size * .035)));
+  if (look.halo > 0) boxBlur(a, ab, w, h, Math.max(2, Math.round(cur.size * .02)));
+  const disp = F.disp * cur.size / 900;          // how strongly lines follow the skin's bumps
+  const dens = look.dens * F.op, shine = F.tex * 3, tint = look.tint;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x, j = i * 4;
+      // displace the ink by the shading gradient so it bends over the surface
+      const gx = lb[i + 1] - lb[i - 1], gy = lb[i + w] - lb[i - w];
+      const sx = clamp(x - gx * disp, 0, w - 1.001), sy = clamp(y - gy * disp, 0, h - 1.001);
+      const ix = sx | 0, iy = sy | 0, fx = sx - ix, fy = sy - iy, q = iy * w + ix;
+      const A = (a[q] * (1 - fx) + a[q + 1] * fx) * (1 - fy) + (a[q + w] * (1 - fx) + a[q + w + 1] * fx) * fy;
+      let halo = 0;
+      if (look.halo > 0) halo = Math.max(0, ab[i] - a[i]) * look.halo;
+      if (A < .004 && halo < .004) continue;
+      const qq = q * 4, aD = A * dens;
+      const detail = lum[i] - lb[i];
+      const hl = detail > 0 ? detail * shine * A : 0;    // skin shine and pores sit on top of the ink
+      for (let c = 0; c < 3; c++) {
+        const t = Math.max(.05, T[qq + c] / 255) * tint[c];
+        let o = B[j + c] * (1 - aD * (1 - Math.min(1, t))) + hl;
+        if (c === 0) o += halo * 28; else o -= halo * (c === 1 ? 10 : 6);   // fresh: slight redness around lines
+        B[j + c] = o < 0 ? 0 : o > 255 ? 255 : o;
+      }
+    }
+  }
+  octx.putImageData(Bi, x0, y0);
+}
+
+/* ---------- design processing ---------- */
+const hex2rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const sstep = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+function loadImage(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+function prepare(img) {
+  const c = document.createElement('canvas'); c.width = c.height = L;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  const iw = img.naturalWidth || img.width || 300, ih = img.naturalHeight || img.height || 300, k = Math.min(L * .94 / iw, L * .94 / ih);
+  x.drawImage(img, (L - iw * k) / 2, (L - ih * k) / 2, iw * k, ih * k);
+  srcData = x.getImageData(0, 0, L, L);
+  const d = srcData.data; let n = 0, s = 0;
+  for (let i = 0; i < d.length; i += 16) {
+    if (d[i + 3] < 40) continue;
+    const mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
+    if (mn > 235) continue; n++; s += mx ? (mx - mn) / mx : 0;
+  }
+  F.mode = (n > 50 && s / n > .28) ? 'color' : 'ink';
+  $('#colorMode').checked = F.mode === 'color';
+}
+function buildProc() {
+  if (!srcData) return;
+  const d = srcData.data, o = new ImageData(L, L), od = o.data, ink = hex2rgb(F.color);
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2], a = d[i + 3] / 255;
+    if (F.mode === 'ink') {
+      const lum = (.299 * r + .587 * g + .114 * b) / 255;
+      od[i] = ink[0]; od[i + 1] = ink[1]; od[i + 2] = ink[2];
+      od[i + 3] = 255 * a * Math.min(1, Math.pow(1 - lum, .85) * 1.12);
+    } else {
+      const w = sstep(.8, .97, Math.min(r, g, b) / 255);
+      od[i] = r; od[i + 1] = g; od[i + 2] = b; od[i + 3] = 255 * a * (1 - w);
+    }
+  }
+  procData = o;
+}
+function buildLayer() {
+  if (!procData) return;
+  const Pd = procData.data, o = new ImageData(L, L), O = o.data;
+  const th = F.curve * 1.25, sinT = Math.sin(th), wrap = th > .001;
+  for (let x = 0; x < L; x++) {
+    const u = (x + .5) / L * 2 - 1;
+    const s = wrap ? Math.asin(clamp(u * sinT, -1, 1)) / th : u;
+    const sx = (s + 1) / 2 * L - .5, x0 = Math.floor(sx), fx = sx - x0, x1 = x0 + 1;
+    const in0 = x0 >= 0 && x0 < L, in1 = x1 >= 0 && x1 < L;
+    const shade = wrap ? .65 + .35 * Math.cos(s * th) : 1;
+    for (let y = 0; y < L; y++) {
+      const i0 = in0 ? (y * L + x0) * 4 : -1, i1 = in1 ? (y * L + x1) * 4 : -1;
+      const a0 = i0 >= 0 ? Pd[i0 + 3] * (1 - fx) : 0, a1 = i1 >= 0 ? Pd[i1 + 3] * fx : 0, a = a0 + a1;
+      if (a < .5) continue;
+      const k = (y * L + x) * 4;
+      for (let c = 0; c < 3; c++) O[k + c] = ((i0 >= 0 ? Pd[i0 + c] * a0 : 0) + (i1 >= 0 ? Pd[i1 + c] * a1 : 0)) / a;
+      O[k + 3] = a * shade;
+    }
+  }
+  rawX.putImageData(o, 0, 0);
+  layX.clearRect(0, 0, L, L);
+  if ('filter' in layX) layX.filter = 'blur(0.7px)';
+  layX.drawImage(rawC, 0, 0);
+  layX.filter = 'none';
+  layerReady = true;
+}
+let lraf = 0;
+const relayer = () => { if (!lraf) lraf = requestAnimationFrame(() => { lraf = 0; buildLayer(); }); };
+
+/* ---------- designs ---------- */
+const svgWrap = inner => '<svg xmlns="http://www.w3.org/2000/svg" width="520" height="520" viewBox="-130 -130 260 260" fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+const svgUrl = s => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+function sprig() {
+  let s = '<path d="M0 118 L0 -100"/>';
+  for (let i = 0; i < 7; i++) {
+    const y = 96 - i * 28, k = (1 - i * .07).toFixed(2), leaf = '<path d="M0 0 C 10 -10 30 -10 44 -2 C 30 8 10 10 0 0 Z"/><path d="M4 0 L 36 -2" stroke-width="1"/>';
+    s += '<g transform="translate(0,' + y + ') rotate(-48) scale(' + k + ')">' + leaf + '</g><g transform="translate(0,' + (y - 14) + ') rotate(-132) scale(' + k + ')">' + leaf + '</g>';
+  }
+  return svgWrap(s + '<path d="M0 -100 C 8 -112 8 -124 0 -130 C -8 -124 -8 -112 0 -100 Z"/>');
+}
+function mandala() {
+  let s = '<circle r="118"/><circle r="112" stroke-width="1"/>';
+  for (let i = 0; i < 24; i++) s += '<circle cx="0" cy="-106" r="2.2" fill="#000" transform="rotate(' + i * 15 + ')"/>';
+  for (let i = 0; i < 12; i++) s += '<path transform="rotate(' + i * 30 + ')" d="M0 -96 C 12 -80, 12 -62, 0 -46 C -12 -62, -12 -80, 0 -96 Z"/>';
+  for (let i = 0; i < 12; i++) s += '<path transform="rotate(' + (i * 30 + 15) + ')" d="M0 -92 L 6 -74 L 0 -60 L -6 -74 Z" fill="#000"/>';
+  s += '<circle r="40"/>';
+  for (let i = 0; i < 8; i++) s += '<path transform="rotate(' + i * 45 + ')" d="M0 -38 C 9 -28, 9 -16, 0 -8 C -9 -16, -9 -28, 0 -38 Z"/>';
+  return svgWrap(s + '<circle r="6" fill="#000"/>');
+}
+function petal(a, len, w) { return '<path transform="rotate(' + a + ')" d="M0 0 C ' + (-w) + ' ' + (-len * .35) + ', ' + (-w * .7) + ' ' + (-len * .8) + ', 0 ' + (-len) + ' C ' + (w * .7) + ' ' + (-len * .8) + ', ' + w + ' ' + (-len * .35) + ', 0 0 Z"/>'; }
+function lotus() {
+  let s = '<g transform="translate(0,45)">';
+  [-78, -52, 52, 78].forEach(a => s += petal(a, 100, 30)); [-26, 26].forEach(a => s += petal(a, 118, 32)); s += petal(0, 135, 34);
+  s += '<path d="M-88 4 Q0 36 88 4"/><path d="M-62 18 Q0 42 62 18"/></g>';
+  return svgWrap(s + '<circle cx="0" cy="-112" r="3" fill="#000"/><circle cx="-18" cy="-104" r="2" fill="#000"/><circle cx="18" cy="-104" r="2" fill="#000"/>');
+}
+function star(x, y, r) { return '<path fill="#000" stroke-width="1" d="M' + x + ' ' + (y - r) + ' Q' + x + ' ' + y + ' ' + (x + r) + ' ' + y + ' Q' + x + ' ' + y + ' ' + x + ' ' + (y + r) + ' Q' + x + ' ' + y + ' ' + (x - r) + ' ' + y + ' Q' + x + ' ' + y + ' ' + x + ' ' + (y - r) + ' Z"/>'; }
+function moon() {
+  let s = '<mask id="m"><rect x="-130" y="-130" width="260" height="260" fill="#fff" stroke="none"/><circle cx="38" cy="-6" r="82" fill="#000" stroke="none"/></mask><circle r="100" fill="#000" stroke="none" mask="url(#m)"/>';
+  return svgWrap(s + star(62, -38, 14) + star(88, 10, 9) + star(48, 52, 11) + star(96, -62, 6) + '<circle r="116" stroke-width="1.2"/>');
+}
+function compass() {
+  let s = '<circle r="112"/><circle r="104" stroke-width="1"/><circle r="64"/>';
+  for (let i = 0; i < 36; i++) s += '<line x1="0" y1="-104" x2="0" y2="' + (i % 3 === 0 ? -90 : -97) + '" transform="rotate(' + i * 10 + ')" stroke-width="1.4"/>';
+  [0, 90, 180, 270].forEach(a => s += '<g transform="rotate(' + a + ')"><path d="M0 -100 L 12 -12 L 0 0 Z" fill="#000"/><path d="M0 -100 L -12 -12 L 0 0 Z"/></g>');
+  [45, 135, 225, 315].forEach(a => s += '<path transform="rotate(' + a + ')" d="M0 -72 L 7 -7 L 0 0 L -7 -7 Z"/>');
+  return svgWrap(s + '<circle r="5" fill="#000"/><path d="M0 -128 L 7 -115 L -7 -115 Z" fill="#000"/>');
+}
+const SAMPLES = [['Sprig', sprig], ['Mandala', mandala], ['Lotus', lotus], ['Moon', moon], ['Compass', compass]]
+  .map(([name, f]) => ({ id: 's-' + name, name, src: svgUrl(f()), kind: 'sample' }));
+const ARTIST = ARTIST_DESIGNS.map((d, i) => ({ id: 'a-' + i, name: d.name || 'Design', src: d.src, kind: 'artist' }));
+
+const STORE = 'inkfit-live-designs';
+let mine = [];
+try { mine = JSON.parse(localStorage.getItem(STORE) || '[]').filter(d => d && typeof d.src === 'string'); } catch (e) { mine = []; }
+function saveMine() { try { localStorage.setItem(STORE, JSON.stringify(mine)); } catch (e) {} }
+function allDesigns() { return ARTIST.concat(mine, SAMPLES); }
+function renderStrip() {
+  const st = $('#strip'); st.textContent = '';
+  const add = el('button', 'tile add'); add.type = 'button'; add.setAttribute('aria-label', 'Add your own design');
+  add.appendChild(el('div', 'art', '+'));
+  add.addEventListener('click', () => $('#fileIn').click());
+  st.appendChild(add);
+  allDesigns().forEach(d => {
+    const b = el('button', 'tile'); b.type = 'button'; b.dataset.id = d.id; b.title = d.name;
+    b.setAttribute('aria-label', d.name); b.setAttribute('aria-pressed', !!(design && design.id === d.id));
+    const art = el('div', 'art'), img = document.createElement('img'); img.alt = ''; img.src = d.src; art.appendChild(img);
+    b.appendChild(art);
+    b.addEventListener('click', () => select(d));
+    if (d.kind === 'mine') {
+      const x = el('span', 'x', '×'); x.setAttribute('role', 'button'); x.setAttribute('aria-label', 'Remove ' + d.name);
+      x.addEventListener('click', ev => { ev.stopPropagation(); mine = mine.filter(m => m.id !== d.id); saveMine(); if (design && design.id === d.id) select(SAMPLES[0]); else renderStrip(); });
+      b.appendChild(x);
+    }
+    st.appendChild(b);
+  });
+}
+async function select(d) {
+  const tok = ++selTok; design = d; renderStrip();
+  try {
+    const img = await loadImage(d.src);
+    if (tok !== selTok) return;
+    prepare(img); buildProc(); buildLayer();
+  } catch (e) { console.warn('Design failed to load', e); }
+}
+$('#fileIn').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const url = URL.createObjectURL(f);
+  try {
+    const img = await loadImage(url);
+    const iw = img.naturalWidth || 600, ih = img.naturalHeight || 600, k = Math.min(1, 700 / Math.max(iw, ih));
+    const c = document.createElement('canvas'); c.width = Math.round(iw * k); c.height = Math.round(ih * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const d = { id: 'm-' + Date.now(), name: f.name.replace(/\.[^.]+$/, '').slice(0, 24) || 'My design', src: c.toDataURL('image/png'), kind: 'mine' };
+    mine.unshift(d); saveMine(); select(d);
+  } catch (err) { $('#pillText').textContent = 'That image could not be opened. Use PNG, JPG or SVG.'; }
+  finally { URL.revokeObjectURL(url); }
+});
+
+/* ---------- spots ---------- */
+function renderSpots() {
+  const box = $('#spots'); box.textContent = '';
+  Object.entries(SPOTS).forEach(([k, s]) => {
+    const b = el('button', 'spot', s.label); b.type = 'button'; b.setAttribute('aria-pressed', k === spot);
+    b.addEventListener('click', () => setSpot(k));
+    box.appendChild(b);
+  });
+  $('#spotHint').textContent = SPOTS[spot].hint;
+}
+async function setSpot(k) {
+  spot = k; cur = null; prevAxis = null; resetLock();
+  Object.assign(F, SPOTS[k].d); F.rot = 0;
+  if (k === 'free') { manual.x = .5; manual.y = .5; }
+  syncUI(); buildLayer(); renderSpots();
+  const need = SPOTS[k].need;
+  if (need) loadDet(need);
+  const wantFacing = SPOTS[k].kind === 'fore' ? 'environment' : (need === 'pose' ? 'user' : facing);
+  if (stream && wantFacing !== facing) { facing = wantFacing; await startCam(); }
+  else facing = wantFacing;
+}
+
+/* ---------- controls ---------- */
+const INKS = [['Black', '#14161b'], ['Blue-black', '#1b2230'], ['Brown', '#3b2a22'], ['Green-black', '#1d2a25'], ['Red', '#7d1f27'], ['Blue', '#1f4b8f']];
+INKS.forEach(([n, c]) => {
+  const b = el('button', 'sw'); b.type = 'button'; b.dataset.c = c; b.style.background = c; b.setAttribute('aria-label', n + ' ink');
+  b.addEventListener('click', () => { F.color = c; F.mode = 'ink'; $('#colorMode').checked = false; syncUI(); buildProc(); buildLayer(); });
+  $('#sws').appendChild(b);
+});
+function syncUI() {
+  const set = (id, v, txt) => { $('#' + id).value = v; $('#' + id + 'o').textContent = txt; };
+  set('sz', Math.round(F.size * 100), Math.round(F.size * 100) + '%');
+  set('pos', Math.round(F.pos * 100), Math.round(F.pos * 100) + '%');
+  set('rot', Math.round(F.rot), Math.round(F.rot) + '°');
+  set('curve', Math.round(F.curve * 100), Math.round(F.curve * 100) + '%');
+  set('op', Math.round(F.op * 100), Math.round(F.op * 100) + '%');
+  set('tex', Math.round(F.tex * 100), Math.round(F.tex * 100) + '%');
+  set('smooth', Math.round(F.smooth * 100), Math.round(F.smooth * 100) + '%');
+  document.querySelectorAll('.sw').forEach(b => b.setAttribute('aria-pressed', F.mode === 'ink' && b.dataset.c === F.color));
+  $('#pos').disabled = spot === 'free';
+}
+const bind = (id, key, after) => $('#' + id).addEventListener('input', e => { F[key] = +e.target.value / (key === 'rot' ? 1 : 100); syncUI(); if (after) after(); });
+bind('sz', 'size'); bind('pos', 'pos'); bind('rot', 'rot'); bind('curve', 'curve', relayer);
+bind('op', 'op'); bind('tex', 'tex'); bind('smooth', 'smooth');
+$('#colorMode').addEventListener('change', e => { F.mode = e.target.checked ? 'color' : 'ink'; syncUI(); buildProc(); buildLayer(); });
+$('#clip').addEventListener('change', e => { F.clip = e.target.checked; });
+$('#btnMirror').addEventListener('click', () => { F.flip = !F.flip; });
+document.querySelectorAll('.look').forEach(b => b.addEventListener('click', () => {
+  F.look = b.dataset.look;
+  document.querySelectorAll('.look').forEach(x => x.setAttribute('aria-pressed', x === b));
+}));
+$('#btnAdjust').addEventListener('click', e => {
+  const open = $('#adjust').hidden; $('#adjust').hidden = !open; e.currentTarget.setAttribute('aria-expanded', open);
+  e.currentTarget.textContent = open ? 'Done' : 'Adjust';
+});
+
+const cmp = $('#btnCompare');
+cmp.addEventListener('pointerdown', e => { e.preventDefault(); compare = true; });
+['pointerup', 'pointerleave', 'pointercancel', 'blur'].forEach(ev => cmp.addEventListener(ev, () => { compare = false; }));
+cmp.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); compare = true; } });
+cmp.addEventListener('keyup', () => { compare = false; });
+cmp.addEventListener('contextmenu', e => e.preventDefault());
+
+/* free placement: drag on the picture (handles object-fit cover and contain) */
+function toCanvas(e) {
+  const r = out.getBoundingClientRect(), fit = getComputedStyle(out).objectFit;
+  const s = fit === 'cover' ? Math.max(r.width / W, r.height / H) : Math.min(r.width / W, r.height / H);
+  return { x: (e.clientX - r.left - (r.width - W * s) / 2) / s, y: (e.clientY - r.top - (r.height - H * s) / 2) / s };
+}
+function dragTo(e) {
+  const p = toCanvas(e), x = clamp(p.x, 0, W), y = clamp(p.y, 0, H);
+  manual.x = x / W; manual.y = y / H;
+  anchor = { x, y }; tpl = null; vel = { x: 0, y: 0 };
+  if (goal) goal = { ...goal, x, y };
+  else if (spot === 'free') goal = { x, y, ang: F.rot * Math.PI / 180, size: F.size * Math.min(W, H) };
+}
+out.addEventListener('pointerdown', e => {
+  const k = SPOTS[spot].kind;
+  if (!W || (k !== 'free' && k !== 'fore')) return;
+  dragging = true; try { out.setPointerCapture(e.pointerId); } catch (err) {}
+  dragTo(e);
+});
+out.addEventListener('pointermove', e => { if (dragging) dragTo(e); });
+['pointerup', 'pointercancel'].forEach(ev => out.addEventListener(ev, () => {
+  if (!dragging) return;
+  dragging = false;
+  if (anchor) {
+    grabTemplate(anchor);
+    if (spot === 'fore') pinned = true;
+    axisRef = armAng; widthRef = armW;
+  }
+}));
+out.addEventListener('wheel', e => {
+  if (!W) return; e.preventDefault();
+  F.size = clamp(F.size * Math.exp(-e.deltaY * .0015), .1, 1.6); syncUI();
+}, { passive: false });
+
+/* snapshot */
+let shotUrl = null, shotBlob = null;
+$('#btnShot').addEventListener('click', () => {
+  if (!W) return;
+  compare = false; compose();
+  out.toBlob(b => {
+    if (!b) return;
+    shotBlob = b;
+    if (shotUrl) URL.revokeObjectURL(shotUrl);
+    shotUrl = URL.createObjectURL(b);
+    $('#shotImg').src = shotUrl; $('#shotSave').href = shotUrl;
+    const file = new File([b], 'inkfit-preview.png', { type: 'image/png' });
+    $('#shotShare').hidden = !(navigator.canShare && navigator.canShare({ files: [file] }));
+    $('#shotView').hidden = false;
+  }, 'image/png');
+});
+$('#shotShare').addEventListener('click', async () => {
+  try { await navigator.share({ files: [new File([shotBlob], 'inkfit-preview.png', { type: 'image/png' })], title: 'My tattoo preview' }); } catch (e) {}
+});
+$('#shotClose').addEventListener('click', () => { $('#shotView').hidden = true; });
+
+/* test hook: ?debug lets an automated check supply hand points */
+if (/[?&]debug\b/.test(location.search)) window.inkfitDebug = { setHand: pts => { debugHand = pts; }, state: () => ({ cur, trackInfo, skinModel, anchor, hasTpl: !!tpl, pinned }) };
+
+/* ---------- start ---------- */
+syncUI(); renderSpots(); renderStrip();
+select(ARTIST[0] || SAMPLES[0]);
+requestAnimationFrame(loop);
+loadDet('hand');
+</script>
+</body>
+</html>
