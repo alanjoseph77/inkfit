@@ -181,7 +181,7 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const L = 512;
 
 /* ---------- state ---------- */
-const F = { size: .4, pos: .45, rot: 0, curve: .45, op: .9, tex: .25, smooth: .6, flip: false, clip: true, color: '#14161b', mode: 'ink', look: 'healed', disp: 1 };
+const F = { size: .4, pos: .45, rot: 0, curve: .45, op: .9, tex: .25, smooth: .6, flip: false, clip: true, color: '#14161b', mode: 'ink', look: 'healed', disp: 1, autoWrap: true };
 const SPOTS = {
   fore:   { label: 'Forearm',         kind: 'fore',  need: 'hand', hint: 'Point the back camera at your forearm with your hand in view. Drag the design to move it.', d: { size: .4, pos: .45, curve: .45 } },
   lupper: { label: 'Left upper arm',  kind: 'limb',  need: 'pose', a: 11, b: 13, hint: 'Use the front camera and step back so your head and shoulders are in view.', d: { size: .45, pos: .55, curve: .4 } },
@@ -591,7 +591,18 @@ function track(now) {
       cur.ang += da * a;
     }
   } else if (cur && now - lastGood > 500) cur = null;
+  autoWrap(now);
   status();
+}
+/* bend the design around the arm like a cylinder: the wider the design is
+   compared with the arm, the more it curves away at the sides */
+let lastWrap = 0;
+function autoWrap(now) {
+  const kind = SPOTS[spot].kind;
+  if (!F.autoWrap || !cur || !armW || (kind !== 'fore' && kind !== 'free') || now - lastWrap < 250) return;
+  const R = armW / 2, half = cur.size * .47;
+  const c = clamp(Math.asin(clamp(half / R, 0, .97)) / 1.25, 0, 1);
+  if (Math.abs(c - F.curve) > .04) { F.curve = c; lastWrap = now; syncUI(); buildLayer(); }
 }
 function status() {
   const pill = $('#pill'), txt = $('#pillText'), sp = SPOTS[spot], need = sp.need;
@@ -611,7 +622,7 @@ function status() {
 
 /* ---------- compositing: ink rendered under the skin ---------- */
 const LOOKS = {
-  healed: { spread: 1.0, dens: .86, halo: 0,   tint: [.96, 1.0, 1.06] },
+  healed: { spread: 1.0, dens: .8, halo: 0,   tint: [.96, 1.0, 1.06] },
   fresh:  { spread: .45, dens: .97, halo: .55, tint: [1, 1, 1] },
 };
 const BUF = {};
@@ -645,8 +656,9 @@ function compose() {
   tctx.setTransform(1, 0, 0, 1, 0, 0);
   tctx.globalCompositeOperation = 'source-over'; tctx.globalAlpha = 1;
   tctx.clearRect(0, 0, W, H);
-  const spread = look.spread * cur.size / 380;
-  if ('filter' in tctx && spread > .3) tctx.filter = 'blur(' + spread.toFixed(2) + 'px)';
+  // match the camera's own softness, plus ink spreading into the skin
+  const spread = .35 + look.spread * cur.size / 700;
+  if ('filter' in tctx) tctx.filter = 'blur(' + spread.toFixed(2) + 'px)';
   tctx.translate(cur.x, cur.y); tctx.rotate(cur.ang); tctx.scale(F.flip ? -k : k, k);
   tctx.drawImage(layerC, -L / 2, -L / 2);
   tctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -688,10 +700,12 @@ function compose() {
       const qq = q * 4, aD = A * dens;
       const detail = lum[i] - lb[i];
       const hl = detail > 0 ? detail * shine * A : 0;    // skin shine and pores sit on top of the ink
+      const grain = (Math.random() - .5) * 7;
       for (let c = 0; c < 3; c++) {
         const t = Math.max(.05, T[qq + c] / 255) * tint[c];
         let o = B[j + c] * (1 - aD * (1 - Math.min(1, t))) + hl;
         if (c === 0) o += halo * 28; else o -= halo * (c === 1 ? 10 : 6);   // fresh: slight redness around lines
+        o += grain * A;                                   // camera noise inside the ink, like the rest of the picture
         B[j + c] = o < 0 ? 0 : o > 255 ? 255 : o;
       }
     }
@@ -865,7 +879,7 @@ function renderSpots() {
 }
 async function setSpot(k) {
   spot = k; cur = null; prevAxis = null; resetLock();
-  Object.assign(F, SPOTS[k].d); F.rot = 0;
+  Object.assign(F, SPOTS[k].d); F.rot = 0; F.autoWrap = true;
   if (k === 'free') { manual.x = .5; manual.y = .5; }
   syncUI(); buildLayer(); renderSpots();
   const need = SPOTS[k].need;
@@ -895,7 +909,7 @@ function syncUI() {
   $('#pos').disabled = spot === 'free';
 }
 const bind = (id, key, after) => $('#' + id).addEventListener('input', e => { F[key] = +e.target.value / (key === 'rot' ? 1 : 100); syncUI(); if (after) after(); });
-bind('sz', 'size'); bind('pos', 'pos'); bind('rot', 'rot'); bind('curve', 'curve', relayer);
+bind('sz', 'size'); bind('pos', 'pos'); bind('rot', 'rot'); bind('curve', 'curve', () => { F.autoWrap = false; relayer(); });
 bind('op', 'op'); bind('tex', 'tex'); bind('smooth', 'smooth');
 $('#colorMode').addEventListener('change', e => { F.mode = e.target.checked ? 'color' : 'ink'; syncUI(); buildProc(); buildLayer(); });
 $('#clip').addEventListener('change', e => { F.clip = e.target.checked; });
